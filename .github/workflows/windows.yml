@@ -1,0 +1,27 @@
+name: Windows toolkit checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run guard, toolkit, and review tests
+        shell: ${{ matrix.shell }}
+        run: python -B -m unittest -v test_guard test_toolkit test_review test_skill_install
+      - name: Check parser helper with the selected PowerShell
+        shell: ${{ matrix.shell }}
+        run: |
+          $result = & .\ps_parse_helper.ps1 -Path .\ps_parse_helper.ps1 | ConvertFrom-Json
+          if ($result.outcome -ne 'valid') { throw 'PowerShell parser helper did not pass its syntax check.' }

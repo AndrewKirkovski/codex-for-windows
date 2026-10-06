@@ -1,0 +1,7 @@
+machine-profile.json
+machine-profile.local.json
+local-machine-profile.json
+.local/machine-profile.json
+__pycache__/
+*.py[cod]
+work/

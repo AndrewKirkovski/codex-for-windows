@@ -1,0 +1,155 @@
+[
+  {
+    "name": "blocked root removal",
+    "kind": "payload",
+    "expected": "invalid",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rm -rf /"
+      }
+    },
+    "replacement": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "Get-ChildItem -LiteralPath C:\\repo"
+      }
+    },
+    "replacement_expected": "clear_unverified"
+  },
+  {
+    "name": "MCP cmd alias blocked",
+    "kind": "payload",
+    "expected": "invalid",
+    "payload": {
+      "tool_name": "mcp__process_manager__sync_run",
+      "tool_input": {
+        "args": {
+          "cmd": "cmd.exe /c start tool.exe"
+        }
+      }
+    },
+    "replacement": {
+      "tool_name": "mcp__process_manager__sync_run",
+      "tool_input": {
+        "args": {
+          "cmd": "rg -n -- needle C:\\repo"
+        }
+      }
+    },
+    "replacement_expected": "clear_unverified"
+  },
+  {
+    "name": "apply patch observed command remains recognized",
+    "kind": "payload",
+    "expected": "clear_unverified",
+    "payload": {
+      "tool_name": "apply_patch",
+      "tool_input": {
+        "command": "*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch"
+      }
+    }
+  },
+  {
+    "name": "unknown schema remains uncertain",
+    "kind": "payload",
+    "expected": "unsupported",
+    "payload": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "script": "rm -rf /"
+      }
+    },
+    "replacement": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "Get-ChildItem -LiteralPath C:\\repo"
+      }
+    },
+    "replacement_expected": "clear_unverified"
+  },
+  {
+    "name": "wrong test filter and zero selected tests",
+    "kind": "test-selection",
+    "expected": "invalid",
+    "observation": {
+      "expected_suite": "guard-tests",
+      "selected_suite": "no-matching-tests",
+      "test_count": 0
+    },
+    "replacement": {
+      "expected_suite": "guard-tests",
+      "selected_suite": "guard-tests",
+      "test_count": 44
+    },
+    "replacement_expected": "valid"
+  },
+  {
+    "name": "multiple executable lookup results",
+    "kind": "lookup-cardinality",
+    "expected": "invalid",
+    "observation": {
+      "match_count": 2
+    },
+    "replacement": {
+      "match_count": 1
+    },
+    "replacement_expected": "valid"
+  },
+  {
+    "name": "failed runtime prerequisite",
+    "kind": "prerequisites",
+    "expected": "prerequisite_missing",
+    "observation": {
+      "checks": [
+        "passed",
+        "failed"
+      ]
+    },
+    "replacement": {
+      "checks": [
+        "passed",
+        "passed"
+      ]
+    },
+    "replacement_expected": "valid"
+  },
+  {
+    "name": "required output missing",
+    "kind": "required-outputs",
+    "expected": "invalid",
+    "observation": {
+      "required": [
+        "test-report.json"
+      ],
+      "present": []
+    },
+    "replacement": {
+      "required": [
+        "test-report.json"
+      ],
+      "present": [
+        "test-report.json"
+      ]
+    },
+    "replacement_expected": "valid"
+  },
+  {
+    "name": "mixed result data",
+    "kind": "homogeneous-results",
+    "expected": "invalid",
+    "observation": {
+      "result_kinds": [
+        "json",
+        "text"
+      ]
+    },
+    "replacement": {
+      "result_kinds": [
+        "json",
+        "json"
+      ]
+    },
+    "replacement_expected": "valid"
+  }
+]

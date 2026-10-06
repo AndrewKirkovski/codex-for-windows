@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-06",
+  "primary_report": "C:/Projects/backuper/.local/work/2026-10-06-[promote]-windows-command-failure-retro.md",
+  "primary_evidence_index": "C:/Projects/backuper/.local/work/2026-10-06-[promote]-windows-command-failure-evidence.json",
+  "audit_scope": {
+    "turns": 182,
+    "command_records": 1289,
+    "flagged_records": 75,
+    "flags_are_confirmed_failures": false
+  },
+  "classification_counts": {
+    "W01": 3,
+    "W02": 1,
+    "W03": 12,
+    "W04": 5,
+    "W06": 3,
+    "W07": 13,
+    "W08": 2,
+    "W09": 9,
+    "W10": 2,
+    "W11": 3,
+    "W13": 7,
+    "W16": 1,
+    "W17": 2,
+    "excluded_source_excerpt": 3,
+    "unresolved": 3,
+    "optional_tool_unavailable": 1,
+    "no_match_or_unresolved_search": 5
+  },
+  "secondary_report": "C:/Projects/gen-2-chat/.local/work/2026-10-06-[keep]-attention-windows-command-failure-retro.md",
+  "secondary_report_exact_failure_count": "unknown",
+  "fixture_scope": "fixtures/behavior.json contains synthetic contract observations. It does not contain historical records.",
+  "privacy": "Only original evidence references and classifications are retained. Commands and diagnostics are omitted.",
+  "reference_index": "evidence-references.json"
+}

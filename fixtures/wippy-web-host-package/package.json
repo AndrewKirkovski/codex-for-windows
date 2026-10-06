@@ -1,0 +1,10 @@
+{
+  "name": "wippy-web-host",
+  "private": true,
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@wippy-fe/vite-plugin": "0.0.0-test"
+  }
+}

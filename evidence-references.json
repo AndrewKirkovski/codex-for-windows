@@ -1,0 +1,643 @@
+{
+  "date": "2026-10-06",
+  "primary_source": "2026-10-06-[promote]-windows-command-failure-evidence.json",
+  "primary_records": [
+    {
+      "execution_id": "exec-4888f1bf-09d4-4ebf-bbfc-fb4a5d7972c8",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W17",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-840188ac-a007-45a0-8697-c7ad9eb749a0",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-4e642551-475a-463c-a246-acca8d496096",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-6953d9db-c47f-4f8c-8645-a1d6cc6ca0af",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W04",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-8cc80523-506f-42a1-b228-df60e165908c",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-96771ba3-23dd-440b-b102-b368c42396a2",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W10",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-bd26c25e-abb3-41c7-b614-4f1f78f8ef99",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W10",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-37f24f45-afea-4cac-9a89-0fbb45f6d44e",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-b8f8cd49-6cdc-4650-b49e-c1e60e649b42",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W17",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-0326eab3-c3bd-449b-b7b8-44bc364fb213",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-f6095936-41de-4d59-ad91-9c305dc0dc52",
+      "thread": "/root",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-13015f0c-a27f-4c70-878f-2a83b9229fda",
+      "thread": "/root/release_coordinator",
+      "exit_code": 0,
+      "classification": "excluded_source_excerpt",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-dad9f60b-577e-4909-a52e-6a52483228c2",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "unresolved",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-116abc48-99ba-4bc4-bbe9-e212b8bff874",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "optional_tool_unavailable",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-274c8a55-149e-4c8d-aa70-434e673ddd28",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-569280e3-b662-4ac0-8e5c-5e91e57cd244",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-798fa27d-92c1-4930-a5be-b5e25c06c5be",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-3237e406-b155-4d2a-8e38-606b6e60576c",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-df4dec2d-2cb6-42b1-9057-1480320aaa5c",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-c0a4d7e1-620d-4b18-9141-5112fa416032",
+      "thread": "/root/release_coordinator",
+      "exit_code": 1,
+      "classification": "no_match_or_unresolved_search",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-eb018953-bd1e-46df-b1da-dc851a003b07",
+      "thread": "/root/metadata_security_review",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-44d176dc-1471-4a06-b81c-5c703c839135",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-8fc153c0-3c40-488b-8124-75b3001dc80b",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "no_match_or_unresolved_search",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-e5fb411e-2bbf-4870-93b9-ac753c1fd00b",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-d69225b4-a404-4698-8a20-4e755a5cd1a2",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "no_match_or_unresolved_search",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-b1d769be-209c-45b2-89fe-7c3d6f04e306",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 0,
+      "classification": "W01",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-4d2fa9a9-bbb9-4948-95bf-a7abe07bd6c5",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-5568e479-4aa5-403f-bf28-7c5193d83e28",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W01",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-5917bf04-7e0f-414d-8c71-b8dbe9094424",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-1e6dcb15-8591-4c71-80d5-c528a715c504",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 0,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-b6b7090a-88f9-4c51-ba31-e9b72b8f284a",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W11",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-81cad46e-2164-4c5a-bbd4-08459579b5ad",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-ef7d7aae-253d-453b-b47c-5dedbd90fe86",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": -1,
+      "classification": "W08",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-d399c2f8-7aae-4a5a-aafa-d61d425d480e",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W04",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-4fbe120b-2f34-40a6-884e-9b5c95fc2107",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W11",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-1c94e446-eb7b-4a9e-8171-1c4e975e0d77",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-6e492691-b1cb-4379-b53d-3ecf7ac2818d",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-5c3a1738-bac2-4101-af0d-58688ee5d2ad",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W04",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-4fe7fdcd-6813-4589-af3b-41c2fd747fe6",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W04",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-94241f77-a9f5-4f76-a7af-bc6db86b14e8",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-8c77760a-0ed9-40d3-8265-9f472938f1d0",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W11",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-316c8f31-e4e7-440e-a9eb-a852cd42e56f",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-54a99f53-4d54-4f87-8359-82fefcdd9e8d",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-ef64c20f-81d0-4597-ac8a-b630dd0c619c",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-1edbd6f3-4c15-49d0-80ad-1a61bd749932",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W16",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-49f28529-367a-40b1-9730-d21e410ad75f",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W04",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-c36fee6f-acf6-4c38-a661-7761edbe4cb9",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-469ed999-214b-4859-b10c-d1acccc720b4",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-295b3e81-49f7-4cb4-a9bd-1546e00fba39",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-0b3b119b-0b9f-48c0-8631-5ebdd794c770",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-7acba003-a5ff-4c0f-a9c2-9314366ab872",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-90c0af4a-91ae-4f04-9b17-f7adb45ff027",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-26ae40de-8169-4677-8f26-1fd7e3c14397",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-79196a7e-21c1-4294-9c8c-36df846c8e13",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-64ffc713-bf6c-4ec9-9257-4e4974e78179",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-348fc0a3-fc39-41ca-8afb-d0447ac60643",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "no_match_or_unresolved_search",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-3c3ebf32-9165-493a-b5d3-35815c418ef8",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "no_match_or_unresolved_search",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-ac70c480-0811-4ee9-b62d-8ada3cc3df00",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W07",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-5401c346-d2f1-418f-b1aa-002c14786d22",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 1,
+      "classification": "W06",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-c34fc095-aa22-4e69-bbc1-eca58da3974e",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": -1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-dbe6be75-b898-4f0c-8f47-bad189635cad",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 0,
+      "classification": "W01",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-25cb3755-37f4-45f1-8e33-440e8930ea4a",
+      "thread": "/root/release_coordinator/client_status",
+      "exit_code": 0,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-0ab4ba70-7994-478b-8875-0cfa5925bbca",
+      "thread": "/root/release_coordinator/metadata_restart",
+      "exit_code": 1,
+      "classification": "W06",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-129bebb3-29a0-4888-bd02-bb8f83fd58a3",
+      "thread": "/root/release_coordinator/metadata_restart",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-1ecc555f-1cd3-4f2e-ac36-3f5d3bd78fc6",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 0,
+      "classification": "excluded_source_excerpt",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-514a8e6d-f4b7-4a60-a023-48b3742d938d",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "W06",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-6f17a4af-da12-4dc5-a545-b957347c9908",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": -1,
+      "classification": "W08",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-388766f5-2c4e-44b9-9816-b5e100c777d3",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "unresolved",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-70ce25f2-329c-4ab4-88e3-60a01d9d8e48",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 0,
+      "classification": "W02",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-189c1119-d233-42ff-b45a-89ad22106d7d",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "W09",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-d4cb1579-07a2-46e7-8f27-99128bd47ff3",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-48b88636-ba6f-4b39-8e71-6ef5f1b6c255",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "W13",
+      "history_output_truncated": false
+    },
+    {
+      "execution_id": "exec-d9d052a2-14f8-4ccb-a9f5-c18ca93b4638",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 0,
+      "classification": "excluded_source_excerpt",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-7d46c8e0-595e-4b94-b6d5-eb410b051aae",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "unresolved",
+      "history_output_truncated": true
+    },
+    {
+      "execution_id": "exec-8d0425e3-880b-486b-8dea-d441641d241d",
+      "thread": "/root/release_coordinator/conditional_probe",
+      "exit_code": 1,
+      "classification": "W03",
+      "history_output_truncated": false
+    }
+  ],
+  "primary_flags_are_confirmed_failure_count": false,
+  "secondary_source": "2026-10-06-[keep]-attention-windows-command-failure-retro.md",
+  "secondary_source_log": "rollout-2026-09-22T17-53-48-01a0c9d2-c429-7233-9136-37f09488b038.jsonl",
+  "secondary_references": [
+    {
+      "id": "W01",
+      "record_lines": [
+        675,
+        53445
+      ]
+    },
+    {
+      "id": "W02",
+      "record_lines": [
+        6039,
+        11791,
+        36143
+      ]
+    },
+    {
+      "id": "W03",
+      "record_lines": [
+        9462,
+        12114
+      ]
+    },
+    {
+      "id": "W04",
+      "record_lines": [
+        34038,
+        6108
+      ]
+    },
+    {
+      "id": "W05",
+      "record_lines": [
+        16
+      ]
+    },
+    {
+      "id": "W06",
+      "record_lines": [
+        6541,
+        38767
+      ]
+    },
+    {
+      "id": "W07",
+      "record_lines": [
+        17548,
+        37407,
+        38197
+      ]
+    },
+    {
+      "id": "W08",
+      "record_lines": [
+        11367,
+        40827,
+        9590
+      ]
+    },
+    {
+      "id": "W09",
+      "record_lines": [
+        264,
+        22625,
+        13970
+      ]
+    },
+    {
+      "id": "W10",
+      "record_lines": [
+        21729,
+        43347
+      ]
+    },
+    {
+      "id": "W11",
+      "record_lines": [
+        11272,
+        53790
+      ]
+    },
+    {
+      "id": "W12",
+      "record_lines": [
+        39443,
+        47187
+      ]
+    },
+    {
+      "id": "W13",
+      "record_lines": [
+        50168,
+        53371,
+        53433,
+        53668,
+        53677
+      ]
+    },
+    {
+      "id": "W14",
+      "record_lines": [
+        23152,
+        28354,
+        43791
+      ]
+    }
+  ],
+  "secondary_exact_total": null,
+  "privacy": "Only original evidence references and classifications are retained. Commands and diagnostics are omitted."
+}

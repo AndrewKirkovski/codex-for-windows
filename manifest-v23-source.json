@@ -1,0 +1,37 @@
+{
+  "name": "codex-command-guard",
+  "version": 23,
+  "scope": "global-user",
+  "inherits": [],
+  "events": [
+    "SessionStart",
+    "PreToolUse",
+    "UserPromptSubmit"
+  ],
+  "installedFor": [
+    "complete-bad-good-rule-contract",
+    "fail-closed-bootstrap",
+    "effective-tool-cwd-with-top-level-fallback",
+    "windows-command-shape-safety",
+    "source-edit-and-read-safety",
+    "credential-output-safety",
+    "prompt-secret-safety",
+    "sandbox-writable-root-preflight",
+    "zero-safe-optional-hook-inventory-preflight",
+    "utf8-default-with-repository-and-protocol-exceptions",
+    "valid-unicode-without-character-censorship",
+    "managed-bare-cmdlet-rejection",
+    "process-manager-routing-preflight",
+    "effective-tool-working-directory-precedence",
+    "wippy-cli-make-ownership-positive-classifier",
+    "native-addon-load-probe-preflight",
+    "codex-config-secret-output-safety"
+  ],
+  "reAudit": "Run the complete contract after Codex hook schema, PowerShell, ripgrep, Python launcher, or process-manager routing changes.",
+  "sourceSha256": {
+    "bootstrap.py": "7725177cb2cc4f837a07753b25a16ad32ad4bc957663d48c7e67224c88e8918b",
+    "guard.py": "600f664abec63f6673f3759fa5631d2936e792c9a971b66f41da3afa927771be",
+    "manifest.json": "98433e31c604b31ff42786da67682d2e1800471e1dbf4329ef6b89c78b057d8f",
+    "test_guard.py": "119f51046b35998d50b2188fde7bcc3dc6be63fce3f4fb7256b58b7561e993c5"
+  }
+}

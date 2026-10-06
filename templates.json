@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "value_safety": "PowerShell callers must pass literal values through safe_powershell_literal. Native commands should use an argv list and keep each value in a separate argument.",
+  "templates": {
+    "WINDOWS-PS51-STRICT-READ-001": {
+      "template": "Get-Content -LiteralPath <path> -Encoding UTF8 -ErrorAction Stop",
+      "shell": "powershell",
+      "input_fields": ["path"]
+    },
+    "WINDOWS-IMPLICIT-SOURCE-DECODE-001": {
+      "template": "Get-Content -LiteralPath <path> -Encoding UTF8 -ErrorAction Stop",
+      "shell": "powershell",
+      "input_fields": ["path"]
+    },
+    "RG-LEADING-DASH-001": {
+      "template": "rg <options> -- <pattern> <directory>",
+      "shell": "argv",
+      "input_fields": ["options", "pattern", "directory"]
+    },
+    "RG-OPTION-AFTER-MARKER-001": {
+      "template": "rg <options> -- <pattern> <directory>",
+      "shell": "argv",
+      "input_fields": ["options", "pattern", "directory"]
+    },
+    "RG-WINDOWS-PATH-GLOB-001": {
+      "template": "rg <options> --glob <filename-glob> -- <pattern> <directory>",
+      "shell": "argv",
+      "input_fields": ["options", "filename_glob", "pattern", "directory"]
+    },
+    "RG-MISSING-PATH-001": {
+      "template": "rg <options> --glob <filename-glob> -- <pattern> <existing-directory>",
+      "shell": "argv",
+      "input_fields": ["options", "filename_glob", "pattern", "existing_directory"]
+    },
+    "WINDOWS-MANAGED-BARE-CMDLET-001": {
+      "template": "Run the cmdlet in profile-free host PowerShell, or invoke a reviewed .ps1 file directly.",
+      "shell": "choice",
+      "input_fields": []
+    },
+    "WINDOWS-SOURCE-WRITE-001": {
+      "template": "Use apply_patch or a structured editor with an exact occurrence or hash guard.",
+      "shell": "choice",
+      "input_fields": []
+    },
+    "WIPPY-MAKEFILE-BUILD-ONLY-001": {
+      "template": "make.bat <owning-target>",
+      "shell": "argv",
+      "input_fields": ["owning_target"]
+    }
+  }
+}
