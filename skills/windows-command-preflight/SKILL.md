@@ -112,8 +112,13 @@ runtime, prerequisites, or outputs. Use `prepare_command` only for uncertain
 managed routes when that tool is available. Simple verified templates need no
 extra preview call.
 
-Use `validate --powershell-file <file>` for a syntax-only check with the native
-PowerShell parser. The tool does not execute that file. Parser validity does
+Use `validate --powershell-file <file> --powershell-executable <absolute-exe>`
+for a syntax-only check with the selected PowerShell parser. Choose the runtime
+that will execute the script. Process Manager's direct `.ps1` route uses Windows
+PowerShell 5.1. Select PowerShell 7 only when the execution call uses that
+interpreter explicitly. Without an override, validation uses Windows PowerShell
+5.1 on Windows. Check the returned interpreter path and version.
+The tool does not execute that file. Parser validity does
 not prove that the candidate can read its inputs or produce the required
 outputs. Keep diagnostics separate from JSON data and verify producer status
 before consuming structured output.

@@ -434,6 +434,78 @@ class RegressionTests(unittest.TestCase):
                         self.ids(payload),
                     )
 
+    def test_nested_visible_shell_bodies_apply_root_delete_rule(self) -> None:
+        unsafe_commands = (
+            'powershell.exe -NoProfile -Command "Remove-Item -LiteralPath C:/ -Recurse -Force"',
+            'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -Command "Remove-Item -LiteralPath C:/ -Recurse -Force"',
+            "cmd.exe /d /c rmdir /s /q C:/",
+            "cmd.exe /d /c echo safe & rmdir /s /q C:/",
+            'cmd.exe /d /c powershell.exe -Command "Remove-Item -LiteralPath C:/ -Recurse -Force"',
+            'cmd.exe /d /c "C:/reviewed/safe.cmd & rmdir /s /q C:/"',
+            'powershell.exe -Command "& C:/reviewed/safe.ps1; Remove-Item -LiteralPath C:/ -Recurse"',
+        )
+        safe_commands = (
+            'powershell.exe -NoProfile -Command "Write-Output \'Remove-Item -LiteralPath C:/ -Recurse -Force\'"',
+            "powershell.exe -NoProfile -Command C:/repo/reviewed.ps1",
+            "powershell.exe -NoProfile -Command & C:/repo/reviewed.ps1",
+            "powershell.exe -NoProfile -File C:/repo/reviewed.ps1",
+            "powershell.exe -NoProfile -File C:/repo/reviewed.ps1 Remove-Item -LiteralPath C:/ -Recurse",
+            'cmd.exe /d /c echo "rmdir /s /q C:/"',
+            'cmd.exe /d /c "echo safe; rmdir /s /q C:/"',
+            "cmd.exe /d /c reviewed.cmd",
+            "powershell.exe -Command",
+            "cmd.exe /c",
+        )
+        for command in unsafe_commands:
+            with self.subTest(kind="unsafe nested body", command=command):
+                self.assertIn("DESTRUCTIVE-ROOT-001", self.ids(self.shell(command)))
+        for command in safe_commands:
+            with self.subTest(kind="safe nested body", command=command):
+                self.assertNotIn("DESTRUCTIVE-ROOT-001", self.ids(self.shell(command)))
+        self.assertEqual(
+            set(),
+            self.ids({
+                "tool_name": "functions.exec",
+                "tool_input": {"code": unsafe_commands[0]},
+            }),
+        )
+        self.assertIn(
+            "SHELL-PAYLOAD-UNRESOLVED-001",
+            self.ids({"tool_name": "shell_command", "tool_input": {"command": [unsafe_commands[0]]}}),
+        )
+        self.assertEqual(
+            set(),
+            self.ids({"tool_name": "future_shell", "tool_input": {"command": unsafe_commands[0]}}),
+        )
+        deeply_nested = "Get-Date"
+        for _ in range(GUARD.MAX_NESTED_COMMAND_DEPTH + 2):
+            deeply_nested = f"powershell.exe -Command {deeply_nested}"
+        self.assertIn("NESTED-COMMAND-DEPTH-001", self.ids(self.shell(deeply_nested)))
+
+    def test_managed_runner_distinguishes_native_names_from_bare_cmdlets(self) -> None:
+        commands = (
+            "test-runner.exe --version",
+            "test-runner --version",
+            "sc query",
+            "C:/tools/get-data.cmd --version",
+            "C:/tools/test-runner.bat --version",
+            "C:/tools/get-results.ps1 --version",
+            "Get-Content.exe --version",
+        )
+        payload = {
+            "tool_name": "mcp__process_manager__sync_run",
+            "tool_input": {"working_dir": "C:/repo"},
+        }
+        for command in commands:
+            with self.subTest(command=command):
+                payload["tool_input"]["command"] = command
+                self.assertNotIn(
+                    "WINDOWS-MANAGED-BARE-CMDLET-001",
+                    self.ids(payload),
+                )
+        payload["tool_input"]["command"] = "Get-Content -LiteralPath C:/repo/a.ts"
+        self.assertIn("WINDOWS-MANAGED-BARE-CMDLET-001", self.ids(payload))
+
     def test_nested_exec_process_manager_source_is_not_reparsed(self) -> None:
         payload = {
             "cwd": "C:/repo",

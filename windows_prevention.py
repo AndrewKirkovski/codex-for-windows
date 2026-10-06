@@ -97,9 +97,50 @@ def _write_atomic(path: Path, data: bytes) -> None:
         raise
 
 
-def _verify_owned_tree(root: Path, expected_files: dict[str, str], *, allow_incomplete: bool = False) -> set[str]:
+def _absolute_lexical(path: Path) -> Path:
+    """Make a path absolute without following junctions or symbolic links."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _reject_reparse_components(path: Path, *, owned_root: Path | None = None) -> None:
+    """Reject reparse points before any operation can follow an owned path."""
+    absolute = _absolute_lexical(path)
+    if owned_root is None:
+        anchor = Path(absolute.anchor)
+        parts = absolute.parts[1:]
+    else:
+        anchor = _absolute_lexical(owned_root)
+        try:
+            relative = absolute.relative_to(anchor)
+        except ValueError as error:
+            raise ValueError("Owned path is outside its supported root") from error
+        parts = relative.parts
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    root_info = root.lstat() if root.exists() else None
+    current = anchor
+    for part in parts:
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            return
+        if current.is_symlink() or getattr(info, "st_file_attributes", 0) & reparse_flag:
+            raise ValueError("Owned path contains a reparse point")
+        current = current / part
+    try:
+        info = current.lstat()
+    except FileNotFoundError:
+        return
+    if current.is_symlink() or getattr(info, "st_file_attributes", 0) & reparse_flag:
+        raise ValueError("Owned path contains a reparse point")
+
+
+def _verify_owned_tree(root: Path, expected_files: dict[str, str], *, allow_incomplete: bool = False, owned_root: Path | None = None) -> set[str]:
+    root = _absolute_lexical(root)
+    _reject_reparse_components(root, owned_root=owned_root)
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    try:
+        root_info = root.lstat()
+    except FileNotFoundError:
+        root_info = None
     if root_info is None or root.is_symlink() or getattr(root_info, "st_file_attributes", 0) & reparse_flag or not root.is_dir():
         raise ValueError("Owned package root is missing or is a reparse point")
     expected_dirs = {
@@ -236,7 +277,14 @@ def _run_hidden(argv: list[str], *, input_text: str | None = None, timeout: int 
 
 
 def _powershell_executable() -> str | None:
-    return shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+    # The managed .ps1 hook runs under Windows PowerShell 5.1.
+    if os.name == "nt":
+        system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+        if system_root:
+            managed = Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+            if managed.is_file():
+                return str(managed)
+    return shutil.which("powershell.exe")
 
 
 def _parse_powershell(path: Path, executable: str | None = None) -> dict[str, Any]:
@@ -245,15 +293,19 @@ def _parse_powershell(path: Path, executable: str | None = None) -> dict[str, An
     exe = executable or _powershell_executable()
     if not exe:
         return {"outcome": "prerequisite_missing", "runtime": "PowerShell", "diagnostics": []}
+    selected = Path(exe)
+    if not selected.is_absolute() or selected.suffix.lower() != ".exe" or not selected.is_file():
+        return {"outcome": "prerequisite_missing", "runtime": None, "executable": str(selected), "diagnostics": [{"id": "POWERSHELL-EXECUTABLE-001", "line": None, "column": None}]}
     helper = PARSER_HELPER.resolve()
     candidate = path.resolve()
-    result = _run_hidden([exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(helper), str(candidate)])
+    result = _run_hidden([str(selected), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(helper), str(candidate)])
     try:
         data = json.loads(result.stdout)
     except (json.JSONDecodeError, TypeError):
-        return {"outcome": "unsupported", "runtime": Path(exe).name, "diagnostics": [{"id": "PARSER-OUTPUT-001", "line": None, "column": None}]}
+        return {"outcome": "unsupported", "runtime": Path(exe).name, "executable": str(selected), "diagnostics": [{"id": "PARSER-OUTPUT-001", "line": None, "column": None}]}
     if result.returncode != 0:
-        return {"outcome": "unsupported", "runtime": Path(exe).name, "diagnostics": [{"id": "PARSER-EXECUTION-001", "line": None, "column": None}]}
+        return {"outcome": "unsupported", "runtime": Path(exe).name, "executable": str(selected), "diagnostics": [{"id": "PARSER-EXECUTION-001", "line": None, "column": None}]}
+    data["executable"] = str(selected)
     return data
 
 
@@ -269,8 +321,10 @@ def _doctor() -> dict[str, Any]:
             str(PARSER_HELPER.resolve()), "-Mode", "Metadata",
         ])
         try:
+            if metadata_run.returncode != 0:
+                raise ValueError("metadata producer exited unsuccessfully")
             metadata = json.loads(metadata_run.stdout)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, ValueError):
             metadata = {"outcome": "unsupported", "tools": []}
         powershell["lookup_metadata"] = metadata
     else:
@@ -292,14 +346,16 @@ def _doctor() -> dict[str, Any]:
     }
 
 
-def _validate(path: Path | None = None, fixtures: Path | None = None) -> dict[str, Any]:
+def _validate(path: Path | None = None, fixtures: Path | None = None, powershell_executable: Path | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"outcome": "valid", "checks": [], "candidate_execution": "never performed"}
     if path is None and fixtures is None:
         return {"outcome": "unsupported", "checks": [{"id": "VALIDATE-INPUT-001", "reason": "provide a PowerShell file or a behavior fixture set"}], "candidate_execution": "never performed"}
+    if powershell_executable is not None and path is None:
+        return {"outcome": "unsupported", "checks": [{"id": "VALIDATE-INPUT-001", "reason": "a PowerShell executable requires a PowerShell file"}], "candidate_execution": "never performed"}
     if path is not None:
         if not path.is_file():
             return {**result, "outcome": "prerequisite_missing", "checks": [{"id": "INPUT-FILE-MISSING-001"}]}
-        parsed = _parse_powershell(path)
+        parsed = _parse_powershell(path, str(powershell_executable) if powershell_executable is not None else None)
         result["checks"].append({"id": "POWERSHELL-PARSER-001", **parsed})
         result["outcome"] = parsed["outcome"]
     if fixtures is not None:
@@ -452,6 +508,8 @@ def _replace_owned_hook_table(original: dict[str, Any], install_root: Path) -> t
 
 def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_agents_hash: str, plan_only: bool = False, expected_skill_sha256: str | None = None) -> dict[str, Any]:
     """Install with full preflight, snapshots, owned-change rollback on failure."""
+    config_dir = _absolute_lexical(config_dir)
+    _reject_reparse_components(config_dir)
     hooks_path = config_dir / "hooks.json"
     agents_path = config_dir / "AGENTS.md"
     source = source.resolve()
@@ -486,7 +544,8 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
     for filename in source_files:
         if not (source / filename).is_file():
             raise ValueError(f"Candidate file is missing: {filename}")
-    install_root = config_dir / "hooks" / "codex-windows-prevention" / f"v{VERSION}"
+    install_root = _absolute_lexical(config_dir / "hooks" / "codex-windows-prevention" / f"v{VERSION}")
+    _reject_reparse_components(install_root, owned_root=config_dir)
     if install_root.exists():
         raise ValueError(f"Install destination already exists: {install_root}")
     if skill_path is not None:
@@ -535,7 +594,7 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
         "include_skill": skill_path is not None,
         "files": files,
         "install_root": str(install_root),
-        "config_dir": str(config_dir.resolve()),
+        "config_dir": str(config_dir),
         "package_files": package_hashes,
     }
     (transaction / "hooks.json.before").write_bytes(original_hooks)
@@ -557,7 +616,7 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
             shutil.copyfile(source / filename, target_path)
             if _digest(_read(target_path)) != package_hashes[filename]:
                 raise OSError(f"Package read-back mismatch for {filename}")
-        _verify_owned_tree(install_root, package_hashes)
+        _verify_owned_tree(install_root, package_hashes, owned_root=config_dir)
         _verify_transaction_files(transaction, files, set())
         _write_atomic(hooks_path, updated_hooks_raw)
         written.append(hooks_path)
@@ -596,8 +655,9 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
             except OSError:
                 residual.append(str(path))
         try:
+            _reject_reparse_components(install_root, owned_root=config_dir)
             if install_root.exists():
-                _verify_owned_tree(install_root, package_hashes, allow_incomplete=True)
+                _verify_owned_tree(install_root, package_hashes, allow_incomplete=True, owned_root=config_dir)
                 shutil.rmtree(install_root)
         except OSError:
             residual.append(str(install_root))
@@ -608,56 +668,67 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
 
 
 def rollback(transaction_dir: Path) -> dict[str, Any]:
-    transaction_dir = transaction_dir.resolve()
+    transaction_dir = _absolute_lexical(transaction_dir)
+    _reject_reparse_components(transaction_dir)
     metadata = json.loads((transaction_dir / "transaction.json").read_text(encoding="utf-8"))
     if metadata.get("version") != VERSION or not isinstance(metadata.get("files"), dict):
         raise ValueError("Transaction metadata is unsupported")
-    config_dir = Path(metadata.get("config_dir", "")).resolve()
-    expected_transaction_parent = (config_dir / "hooks" / "codex-windows-prevention" / "transactions").resolve()
+    raw_config_dir = Path(metadata.get("config_dir", ""))
+    if not raw_config_dir.is_absolute():
+        raise ValueError("Transaction config directory must be absolute")
+    config_dir = _absolute_lexical(raw_config_dir)
+    _reject_reparse_components(config_dir)
+    expected_transaction_parent = _absolute_lexical(config_dir / "hooks" / "codex-windows-prevention" / "transactions")
     if transaction_dir.parent != expected_transaction_parent:
         raise ValueError("Transaction directory is outside its supported config destination")
     if transaction_dir.name in {"", ".", ".."}:
         raise ValueError("Transaction directory name is invalid")
-    expected_hooks_path = (config_dir / "hooks.json").resolve()
-    expected_agents_path = (config_dir / "AGENTS.md").resolve()
+    expected_hooks_path = _absolute_lexical(config_dir / "hooks.json")
+    expected_agents_path = _absolute_lexical(config_dir / "AGENTS.md")
     include_skill = metadata.get("include_skill", False)
     if not isinstance(include_skill, bool):
         raise ValueError("Transaction optional skill flag is invalid")
-    expected_skill_path = (config_dir / "skills" / "windows-command-preflight" / "SKILL.md").resolve()
-    expected_install_root = (config_dir / "hooks" / "codex-windows-prevention" / f"v{VERSION}").resolve()
+    expected_skill_path = _absolute_lexical(config_dir / "skills" / "windows-command-preflight" / "SKILL.md")
+    expected_install_root = _absolute_lexical(config_dir / "hooks" / "codex-windows-prevention" / f"v{VERSION}")
     allowed_paths = {str(expected_hooks_path), str(expected_agents_path)}
     if include_skill:
         allowed_paths.add(str(expected_skill_path))
-    if set(map(lambda value: str(Path(value).resolve()), metadata["files"].keys())) != allowed_paths:
+    if any(not Path(value).is_absolute() for value in metadata["files"]) or set(map(lambda value: str(_absolute_lexical(Path(value))), metadata["files"].keys())) != allowed_paths:
         raise ValueError("Transaction contains paths outside its supported config files")
-    if Path(metadata.get("install_root", "")).resolve() != expected_install_root:
+    if not Path(metadata.get("install_root", "")).is_absolute() or _absolute_lexical(Path(metadata.get("install_root", ""))) != expected_install_root:
         raise ValueError("Transaction install path is outside its supported destination")
     preflight: list[tuple[Path, bytes, bytes, str, Path]] = []
     expected_package = metadata.get("package_files")
     if not isinstance(expected_package, dict) or any(not isinstance(key, str) or Path(key).is_absolute() or ".." in Path(key).parts for key in expected_package):
         raise ValueError("Transaction package inventory is invalid")
     install_root = expected_install_root
-    _verify_owned_tree(install_root, expected_package)
+    _verify_owned_tree(install_root, expected_package, owned_root=config_dir)
     for path_text, data in metadata["files"].items():
         path = Path(path_text)
+        if not path.is_absolute():
+            raise ValueError("Transaction contains a relative configuration path")
+        path = _absolute_lexical(path)
+        _reject_reparse_components(path, owned_root=config_dir)
         current = _read(path)
         if _digest(current) != data.get("after"):
             raise ValueError(f"Rollback precondition failed for {path}; installed bytes changed")
         backup_name = data.get("backup")
-        if path.resolve() == expected_hooks_path:
+        if path == expected_hooks_path:
             expected_backup = "hooks.json.before"
-        elif path.resolve() == expected_agents_path:
+        elif path == expected_agents_path:
             expected_backup = "AGENTS.md.before"
-        elif include_skill and path.resolve() == expected_skill_path:
+        elif include_skill and path == expected_skill_path:
             expected_backup = "SKILL.md.before"
         else:
             raise ValueError("Transaction contains an unsupported configuration path")
         if backup_name != expected_backup:
             raise ValueError(f"Transaction backup path is invalid for {path}")
-        backup = _read(transaction_dir / backup_name)
+        backup_path = transaction_dir / backup_name
+        _reject_reparse_components(backup_path, owned_root=transaction_dir)
+        backup = _read(backup_path)
         if _digest(backup) != data.get("before"):
             raise ValueError(f"Transaction backup check failed for {path}")
-        preflight.append((path, current, backup, data["before"], transaction_dir / backup_name))
+        preflight.append((path, current, backup, data["before"], backup_path))
     restored: list[Path] = []
     try:
         restored_set: set[Path] = set()
@@ -668,7 +739,8 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
                     raise ValueError(f"Rollback target changed after preflight: {candidate}")
                 if _digest(_read(candidate_backup_path)) != candidate_before:
                     raise ValueError(f"Rollback backup changed after preflight: {candidate.name}")
-            _verify_owned_tree(install_root, expected_package)
+            _verify_owned_tree(install_root, expected_package, owned_root=config_dir)
+            _reject_reparse_components(path, owned_root=config_dir)
             _write_atomic(path, backup)
             restored.append(path)
             restored_set.add(path)
@@ -677,8 +749,9 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
                 raise OSError(f"Read-back mismatch for {path}")
     except BaseException as error:
         raise RuntimeError(f"Rollback incomplete after {type(error).__name__}; restored paths: {[str(p) for p in restored]}") from error
+    _reject_reparse_components(install_root, owned_root=config_dir)
     if install_root.exists():
-        _verify_owned_tree(install_root, expected_package)
+        _verify_owned_tree(install_root, expected_package, owned_root=config_dir)
         shutil.rmtree(install_root)
     return {"outcome": "rolled_back", "restored": [str(path) for path in restored]}
 
@@ -699,6 +772,7 @@ def main(argv: list[str] | None = None) -> int:
     recommend_parser.add_argument("--show-command", action="store_true")
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--powershell-file", type=Path)
+    validate_parser.add_argument("--powershell-executable", type=Path)
     validate_parser.add_argument("--fixtures", type=Path)
     install_parser = sub.add_parser("install")
     install_parser.add_argument("--config-dir", type=Path, required=True)
@@ -730,7 +804,7 @@ def main(argv: list[str] | None = None) -> int:
                         output["command"] = normalized["tool_input"]["command"]
                         output["command_included"] = True
         elif args.action == "validate":
-            output = _validate(args.powershell_file, args.fixtures)
+            output = _validate(args.powershell_file, args.fixtures, args.powershell_executable)
         elif args.action == "install":
             output = install(args.config_dir, args.source, args.expected_hooks_sha256, args.expected_agents_sha256, args.plan_only, args.expected_skill_sha256)
         else:

@@ -54,6 +54,11 @@ RULE_MESSAGES = {
         "cannot be inspected. Run a direct reviewed .ps1 target, or use a "
         "small inspectable read-only -Command with explicit failure propagation."
     ),
+    "NESTED-COMMAND-DEPTH-001": (
+        "Blocked shell nesting beyond the inspection limit because part of the "
+        "visible command could not be checked. Use separate reviewed steps or "
+        "inspect and invoke a reviewed script directly."
+    ),
     "INLINE-CODE-TRANSPORT-001": (
         "Blocked shell-sensitive inline Node/Python code. Put the program in "
         "a reviewed temporary script, execute that script directly, and verify "
@@ -170,6 +175,13 @@ MANAGED_PROCESS_TOOL_NAMES = {
     "process_manager.bg_run",
     "sync_run",
     "bg_run",
+}
+MANAGED_BARE_CMDLETS = {
+    "get-content", "clear-content", "set-content", "add-content",
+    "get-item", "get-childitem", "remove-item", "move-item", "copy-item",
+    "rename-item", "resolve-path", "test-path", "split-path",
+    "get-itemproperty", "set-itemproperty", "remove-itemproperty",
+    "clear-itemproperty",
 }
 SHELL_TOOL_NAMES = {
     "Bash",
@@ -365,6 +377,98 @@ def _invocation(segment: str) -> tuple[str, list[str]]:
     if not tokens:
         return "", []
     return _basename(tokens[0]), tokens[1:]
+
+
+MAX_NESTED_COMMAND_DEPTH = 3
+
+
+def _nested_command_bodies(segment: str) -> list[tuple[str, bool]]:
+    """Return visible command bodies passed to PowerShell or cmd.exe."""
+    executable, args = _invocation(segment)
+    if executable in {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+        for index, arg in enumerate(args):
+            if arg.lower() in {"-command", "-c", "-commandwithargs"}:
+                body = " ".join(args[index + 1:]).strip()
+                if body:
+                    return [(body, False)]
+                return []
+            if arg.lower() in {"-file", "-f"}:
+                return []
+        return []
+    if executable not in {"cmd", "cmd.exe"}:
+        return []
+    for index, arg in enumerate(args):
+        if arg.lower() in {"/c", "/k"}:
+            body = " ".join(args[index + 1:]).strip()
+            if body:
+                return [(body, True)]
+            return []
+    return []
+
+
+def _split_cmd_body(command: str) -> list[str]:
+    """Split cmd.exe operators while respecting quotes and caret escapes."""
+    segments: list[str] = []
+    buffer: list[str] = []
+    quoted = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "^" and index + 1 < len(command):
+            buffer.extend((char, command[index + 1]))
+            index += 2
+            continue
+        if char == '"':
+            quoted = not quoted
+            buffer.append(char)
+            index += 1
+            continue
+        pair = command[index:index + 2]
+        if not quoted and pair in {"&&", "||"}:
+            segments.append("".join(buffer).strip())
+            buffer = []
+            index += 2
+            continue
+        if not quoted and char in {"&", "|", "\r", "\n"}:
+            segments.append("".join(buffer).strip())
+            buffer = []
+            index += 1
+            if char == "\r" and index < len(command) and command[index] == "\n":
+                index += 1
+            continue
+        buffer.append(char)
+        index += 1
+    segments.append("".join(buffer).strip())
+    return [segment for segment in segments if segment]
+
+
+def _nested_root_delete_findings(
+    segments: list[str],
+    depth: int = 0,
+) -> list[Finding]:
+    if depth >= MAX_NESTED_COMMAND_DEPTH:
+        for segment in segments:
+            for body, is_cmd in _nested_command_bodies(segment):
+                nested_segments = _split_cmd_body(body) if is_cmd else _split_shell(body)[0]
+                findings = _root_delete_findings(nested_segments)
+                if findings:
+                    return findings
+                if any(_nested_command_bodies(nested) for nested in nested_segments):
+                    return [_finding("NESTED-COMMAND-DEPTH-001")]
+        return []
+    for segment in segments:
+        for body, is_cmd in _nested_command_bodies(segment):
+            if is_cmd:
+                nested_segments = _split_cmd_body(body)
+            else:
+                nested_segments, _separators = _split_shell(body)
+            findings = _root_delete_findings(nested_segments)
+            if findings:
+                return findings
+            findings = _nested_root_delete_findings(nested_segments, depth + 1)
+            if findings:
+                return findings
+    return []
 
 
 def _mask_quoted(command: str) -> str:
@@ -962,16 +1066,9 @@ def _managed_bare_cmdlet_findings(
 ) -> list[Finding]:
     if tool_name not in MANAGED_PROCESS_TOOL_NAMES:
         return []
-    cmdlet_verbs = {
-        "add", "clear", "compare", "convertfrom", "convertto", "copy",
-        "export", "find", "format", "get", "group", "import", "invoke",
-        "join", "measure", "move", "new", "out", "read", "remove",
-        "rename", "resolve", "select", "set", "sort", "split", "start",
-        "stop", "test", "wait", "where", "write",
-    }
     for segment in segments:
         executable, _args = _invocation(segment)
-        if "-" in executable and executable.split("-", 1)[0] in cmdlet_verbs:
+        if executable in MANAGED_BARE_CMDLETS:
             return [_finding("WINDOWS-MANAGED-BARE-CMDLET-001")]
     return []
 
@@ -1002,6 +1099,7 @@ def classify(payload: object) -> list[Finding]:
             return _deduplicate(findings)
         segments, separators = _split_shell(command)
         findings.extend(_root_delete_findings(segments))
+        findings.extend(_nested_root_delete_findings(segments))
         findings.extend(_git_findings(segments))
         findings.extend(_remote_exec_findings(segments, separators))
         findings.extend(_transport_findings(tool_name, command, segments, separators))
@@ -1105,6 +1203,9 @@ def _patch_payload(command: str) -> dict[str, object]:
 def contract_cases() -> list[tuple[str, object, object]]:
     fixture_root = Path(__file__).with_name("fixtures")
     wippy = str(fixture_root / "wippy-project")
+    deeply_nested = "Get-Date"
+    for _ in range(MAX_NESTED_COMMAND_DEPTH + 2):
+        deeply_nested = f"powershell.exe -Command {deeply_nested}"
     return [
         ("GIT-SAFE-DIRECTORY-001",
          _shell_payload("git config --global safe.directory C:/repo"),
@@ -1126,6 +1227,9 @@ def contract_cases() -> list[tuple[str, object, object]]:
          _shell_payload("curl.exe -fsSLo install.sh https://example.invalid/install.sh")),
         ("WINDOWS-NESTED-PS-001",
          _shell_payload("powershell.exe -EncodedCommand ZQBjAGgAbwAgAHgA"),
+         _shell_payload("powershell.exe -NoProfile -Command Get-Date")),
+        ("NESTED-COMMAND-DEPTH-001",
+         _shell_payload(deeply_nested),
          _shell_payload("powershell.exe -NoProfile -Command Get-Date")),
         ("INLINE-CODE-TRANSPORT-001",
          _shell_payload('node -e "const x = {value: 1}"'),

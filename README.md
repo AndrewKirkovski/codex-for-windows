@@ -22,6 +22,13 @@ source locations. It omits parser messages because they can contain private
 source text. Metadata checks use PowerShell command discovery without invoking
 the discovered command.
 
+For script validation, pass `validate --powershell-file <script.ps1>
+--powershell-executable <absolute-exe>` with the runtime that will execute the
+script. The direct `.ps1` Process Manager route uses Windows PowerShell 5.1.
+Validation defaults to that runtime on Windows. An explicit PowerShell 7
+execution call needs validation with that same executable. Check the returned
+interpreter path and version.
+
 Installation requires an explicit Codex configuration directory and the exact
 current SHA-256 values for `hooks.json` and `AGENTS.md`. The installer checks
 all inputs before writing, saves byte-exact backups, copies the package,
@@ -30,6 +37,9 @@ back. It preserves unrelated hook entries and event state. It does not alter
 trust hashes. Review the installed hooks through Codex's normal trust flow;
 enabling hooks remains a user action. Rollback restores the saved files only
 when the installed files and package still match their recorded hashes.
+Installation stores absolute paths, so rollback can run from another working
+directory. Rollback rejects junctions and other reparse points in the owned
+package path before reading or removing their targets.
 
 To update an existing discovered preflight skill, pass its exact current hash
 as `--expected-skill-sha256`. The installer replaces it with a short pointer to

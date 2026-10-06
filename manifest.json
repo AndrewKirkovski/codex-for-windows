@@ -2,7 +2,7 @@
   "name": "codex-windows-prevention",
   "version": 24,
   "runtime": "Python standard library, Python 3.10 or newer",
-  "powershell_parser": "Windows PowerShell 5.1 or PowerShell 7 when validating PowerShell files",
+  "powershell_parser": "Fixed Windows PowerShell 5.1 by default; an explicit absolute executable selects PowerShell 7",
   "events": ["SessionStart", "UserPromptSubmit", "PreToolUse"],
   "capabilities": [
     "doctor",
@@ -19,7 +19,8 @@
     "Command analysis does not prove command behavior or test coverage.",
     "Unknown command and tool payload shapes are reported as unsupported.",
     "The hook does not approve a command or prove hook trust.",
-    "PowerShell syntax parsing does not execute a candidate script or prove its prerequisites."
+    "PowerShell syntax parsing does not execute a candidate script or prove its prerequisites.",
+    "Visible shell bodies are inspected to a bounded depth. Further nested shells require reviewed steps or a direct reviewed script."
   ],
   "re_audit": "Review after Codex hook schema, PowerShell, ripgrep, Python launcher, or process routing changes."
 }

@@ -68,11 +68,17 @@ native modules before running the owning suite.
 ## Check script syntax without execution
 
 ```text
-python -B windows_prevention.py validate --powershell-file <reviewed-script.ps1>
+python -B windows_prevention.py validate --powershell-file <reviewed-script.ps1> --powershell-executable "<absolute-powershell-executable>"
 ```
 
-The helper uses the native PowerShell parser. A parser-level valid result proves
-syntax for that parser version. It does not prove paths, permissions, outputs,
+Select the interpreter that will execute the script. Process Manager's direct
+`.ps1` route uses Windows PowerShell 5.1. To execute with PowerShell 7, call its
+verified executable explicitly and pass the reviewed file through `-File`.
+Validation defaults to Windows PowerShell 5.1 on Windows. Check the reported
+interpreter path and version before using the result.
+
+The helper uses the selected native PowerShell parser. A parser-level valid
+result proves syntax for that parser version. It does not prove paths, permissions, outputs,
 runtime behavior, or test coverage. For Python files, use `compile` with bytes
 read from the file in a reviewed checker. Do not create bytecode merely to check
 syntax.

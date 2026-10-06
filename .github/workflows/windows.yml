@@ -19,7 +19,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run guard, toolkit, and review tests
         shell: ${{ matrix.shell }}
-        run: python -B -m unittest -v test_guard test_toolkit test_review test_skill_install
+        run: python -B -m unittest -v test_guard test_toolkit test_review test_skill_install test_fixes
       - name: Check parser helper with the selected PowerShell
         shell: ${{ matrix.shell }}
         run: |

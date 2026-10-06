@@ -17,6 +17,27 @@ those facts from command text alone.
 
 ## Verification
 
+The review corrections passed 77 toolkit tests on Python 3.10. The runner
+correction passed 91 tests across the same five owning files and built
+successfully. Seven fresh MCP checks confirmed that preview remains read-only.
+The eight added installer and parser tests ran without skips. They include
+three real Windows junction checks, rollback after a working-directory change,
+and separate parsing with real PowerShell 5.1 and 7 without candidate execution.
+
+The guard now checks visible nested PowerShell and CMD bodies for root removal.
+It also checks commands after a script invocation. PowerShell `-File` arguments
+remain data. More than three levels of further shell nesting require separate
+reviewed steps or a direct reviewed script. The guard does not read scripts or
+prove their behavior. Known filesystem cmdlets receive the managed-runner
+surface check; dashed native program and script names do not receive it.
+
+Validation selects the fixed Windows PowerShell interpreter by default, which
+matches the runner's direct `.ps1` route. An explicit absolute executable selects
+PowerShell 7. Rollback checks the owned path and its ancestors for reparse points
+before reading backups, walking the package, restoring globals, or removing it.
+Install records absolute paths so a later working-directory change is safe.
+Missing Git Bash produces the sanitized `interpreter_missing` preview problem.
+
 The retained baseline is 14 live command checks, 55 owning runner tests, and
 44 v23 guard tests. The implemented runner build passed 90 owning tests across
 five files. Seven fresh MCP checks confirmed preview dispatch, existing command

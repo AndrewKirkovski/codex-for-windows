@@ -1,5 +1,15 @@
 # Changes
 
+## Guard 24 review fixes
+
+- Reject package-path junctions before rollback follows or removes a target.
+- Store absolute install paths so rollback works from another directory.
+- Select the PowerShell validation runtime explicitly. Default to Windows
+  PowerShell 5.1 for the direct managed script route on Windows.
+- Inspect visible PowerShell and cmd command bodies with the existing rules.
+- Accept native and script targets with dashed names in the managed runner.
+- Report a missing Git Bash prerequisite clearly in Process Manager preview.
+
 ## Guard 24
 
 - Add prevention recipes, environment checks, command recommendations, and
