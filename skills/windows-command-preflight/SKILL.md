@@ -41,6 +41,16 @@ route. Put nontrivial scripts and write logic in reviewed files. Review authored
 inline code before use. Internal encoded transport in a verified runner is
 allowed; it is not a reason to reject an otherwise valid call.
 
+## Process Manager use in Codex
+
+When Codex uses Process Manager, use `sync_run` for one-shot commands and
+`bg_run` for long-lived processes. Do not use `bg_list` as routine preflight
+for short commands or source edits. Check a known listener port with `bg_port_check`, which gives
+an advisory snapshot. Otherwise inspect live processes only to resolve a
+lifecycle or duplicate-process question. Use persisted logs to view unchanged
+command output again. These rules guide Codex and do not set policy for other
+Process Manager clients.
+
 ## Source Editing
 
 Use `apply_patch` by default for small manual edits. Use a reviewed CLI editor
