@@ -38,7 +38,7 @@
       "input_fields": []
     },
     "WINDOWS-SOURCE-WRITE-001": {
-      "template": "Use apply_patch or a structured editor with an exact occurrence or hash guard.",
+      "template": "Use apply_patch for a small manual edit. For structured, multi-file, formatter, or generated edits, use a reviewed saved CLI editor through the managed runner. Guard manual replacements with an expected occurrence count or hash, and read back the exact output.",
       "shell": "choice",
       "input_fields": []
     },

@@ -74,6 +74,15 @@ Profile-free saved-script reads passed on both PowerShell 5.1 and 7. The fallbac
 set `CREATE_NO_WINDOW`. The recipes cover source reads and edits, JSON, scripts,
 searches, checks, tests, counts, prerequisites, outputs, and process control.
 
+The live edit-path probe confirmed that `apply_patch` created and updated
+literal and Unicode scratch text. A reviewed Python editor then changed a
+second workspace file through Process Manager with an expected hash and
+occurrence count. Exact byte read-back confirmed that Unicode, dollar signs,
+backticks, quotes, UTF-8 without BOM, and LF newlines were preserved. Process
+Manager returned exit 0 in 82 ms. These results support the documented CLI edit
+path for structured, multi-file, formatter, or generated changes. The path
+remains subject to the Codex sandbox and write approval.
+
 ## External research
 
 A [Codex issue report](https://github.com/openai/codex/issues/9581) describes

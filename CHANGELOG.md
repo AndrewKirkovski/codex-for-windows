@@ -9,6 +9,8 @@
 - Inspect visible PowerShell and cmd command bodies with the existing rules.
 - Accept native and script targets with dashed names in the managed runner.
 - Report a missing Git Bash prerequisite clearly in Process Manager preview.
+- Use `apply_patch` for small manual edits and reviewed saved CLI editors for
+  structured or generated edits, with sandbox and read-back checks preserved.
 
 ## Guard 24
 

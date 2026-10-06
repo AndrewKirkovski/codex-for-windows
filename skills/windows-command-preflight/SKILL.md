@@ -41,6 +41,22 @@ route. Put nontrivial scripts and write logic in reviewed files. Review authored
 inline code before use. Internal encoded transport in a verified runner is
 allowed; it is not a reason to reject an otherwise valid call.
 
+## Source Editing
+
+Use `apply_patch` by default for small manual edits. Use a reviewed CLI editor
+saved in a file and run it through the managed runner for structured or
+multi-file edits, formatters, code generation, or when a demonstrated patch
+tool failure prevents a safe edit. Do not create a one-off helper script for a
+small edit that `apply_patch` can handle.
+
+Read the exact current file first. Use exact literal paths and the runtime that
+owns the project. Guard each manual replacement with an expected occurrence
+count or SHA-256 hash. Review saved CLI editors and their inputs before running
+them. Use UTF-8 without BOM by default, preserve the existing newline contract,
+and read back the exact output. CLI and Process Manager calls remain subject to
+the Codex sandbox and write approval; they do not provide a way around those
+controls.
+
 ## Repository Inventories
 
 Do not pass assumed `src`, `test`, or `tests` directories as mandatory `rg`

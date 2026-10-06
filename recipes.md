@@ -39,12 +39,23 @@ An exit greater than 1 means a failed search, and its output is partial evidence
 
 ## Edit source and JSON
 
-Read the exact current file before an edit. Use `apply_patch` or a structured
-editor with an expected occurrence count or SHA-256 guard. Select UTF-8 without
-BOM unless the file's protocol requires another encoding. Preserve Unicode and
-the existing newline contract. Keep large replacement bodies in reviewed files.
-After the write, read back the bytes, review the diff, and use the owning parser.
-If a write fails, require a verified output before any dependent check or run.
+Use `apply_patch` by default for small manual edits. Use a reviewed CLI editor
+saved in a file and run it through the managed runner for structured or
+multi-file edits, formatters, code generation, or after a demonstrated patch
+tool failure. Do not create a one-off helper script for a small edit that
+`apply_patch` can handle.
+
+Read the exact current file before editing. Use exact literal paths and the
+runtime that owns the project. Guard each manual replacement with an expected
+occurrence count or SHA-256 hash. For CLI edits, review the saved editor and its
+inputs before running it. Select UTF-8 without BOM unless the file's protocol
+requires another encoding, and preserve Unicode and the existing newline
+contract. The CLI and managed runner stay subject to the Codex sandbox and
+write approval; they do not grant extra write access.
+
+After the write, read back the exact bytes, review the diff, and use the owning
+parser. If a write fails, require a verified output before any dependent check
+or run.
 
 Use a JSON serializer, such as `json.dumps(value, ensure_ascii=False)`, instead
 of manual escaping. Read JSON with strict UTF-8 decoding, parse it, and check

@@ -120,8 +120,11 @@ RULE_MESSAGES = {
         "projects are excluded."
     ),
     "WINDOWS-SOURCE-WRITE-001": (
-        "Blocked a shell-based source rewrite. Use apply_patch, a structured "
-        "formatter, or a reviewed literal editor with an occurrence/hash guard."
+        "Blocked a direct shell source rewrite. Use apply_patch for a small "
+        "manual edit, or a reviewed saved CLI editor through the managed runner "
+        "for structured, multi-file, formatter, or generated edits. Guard manual "
+        "replacements with an expected occurrence count or hash, then read back "
+        "the exact output."
     ),
     "SECRET-FILE-OUTPUT-001": (
         "Blocked direct output from a credential-bearing file. Use Test-Path "
