@@ -439,6 +439,50 @@ def _expected_hash(path: Path, expected: str) -> bytes:
     return raw
 
 
+def _snapshot_config_file(path: Path, expected: str | None) -> bytes | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        if expected is not None:
+            raise ValueError(f"Precondition failed for {path}: file is missing.")
+        return None
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"Precondition failed for {path}: expected a regular file.")
+    raw = _read(path)
+    if expected is not None and (not re.fullmatch(r"[0-9a-fA-F]{64}", expected) or _digest(raw).lower() != expected.lower()):
+        raise ValueError(f"Precondition failed for {path}: bytes do not match the supplied SHA-256.")
+    return raw
+
+
+def _matches_file_state(path: Path, *, exists: bool, digest: str | None = None) -> bool:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return not exists
+    if not exists or not stat.S_ISREG(info.st_mode):
+        return False
+    return digest is None or _digest(_read(path)) == digest
+
+
+def _write_new(path: Path, data: bytes) -> None:
+    """Create a file without replacing a path that appeared after preflight."""
+    _reject_reparse_components(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".codex-write-", dir=str(path.parent))
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temp, path)
+    finally:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+
+
 def _skill_pointer_bytes(install_root: Path) -> bytes:
     detailed = quote((install_root / "skills" / "windows-command-preflight" / "SKILL.md").resolve().as_posix(), safe=":/")
     recipes = quote((install_root / "recipes.md").resolve().as_posix(), safe=":/")
@@ -455,24 +499,48 @@ def _skill_pointer_bytes(install_root: Path) -> bytes:
     return text.encode("utf-8")
 
 
-def _verify_transaction_files(transaction: Path, files: dict[str, dict[str, str]], written: set[str]) -> None:
+def _verify_transaction_files(transaction: Path, files: dict[str, dict[str, Any]], written: set[str], *, verify_backups: bool = True) -> None:
     for path_text, details in files.items():
-        backup_path = transaction / details["backup"]
-        if _digest(_read(backup_path)) != details["before"]:
-            raise RuntimeError(f"Transaction backup changed: {details['backup']}")
-        expected = details["after"] if path_text in written else details["before"]
-        if _digest(_read(Path(path_text))) != expected:
-            raise RuntimeError(f"Configuration changed during install: {Path(path_text).name}")
+        _reject_reparse_components(Path(path_text))
+        existed_before = details.get("before_exists", True)
+        if not isinstance(existed_before, bool):
+            raise RuntimeError(f"Transaction existence flag is invalid: {Path(path_text).name}")
+        if existed_before and verify_backups:
+            backup_path = transaction / details["backup"]
+            if _digest(_read(backup_path)) != details["before"]:
+                raise RuntimeError(f"Transaction backup changed: {details['backup']}")
+        path = Path(path_text)
+        if path_text in written:
+            expected = details.get("after")
+            if not isinstance(expected, str) or not _matches_file_state(path, exists=True, digest=expected):
+                raise RuntimeError(f"Configuration changed during install: {path.name}")
+        elif existed_before:
+            if not _matches_file_state(path, exists=True, digest=details.get("before")):
+                raise RuntimeError(f"Configuration changed during install: {path.name}")
+        elif not _matches_file_state(path, exists=False):
+            raise RuntimeError(f"Configuration file appeared during install: {path.name}")
+
+
+def _new_hook_entry(event: str, command: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {"hooks": [{"type": "command", "command": command, "commandWindows": command}]}
+    if event == "PreToolUse":
+        entry["matcher"] = "^(?:" + "|".join(re.escape(name) for name in sorted(SUPPORTED_TOOLS)) + ")$"
+    return entry
 
 
 def _replace_owned_hook_table(original: dict[str, Any], install_root: Path) -> tuple[dict[str, Any], dict[str, int]]:
+    if "hooks" not in original:
+        original["hooks"] = {}
     hooks = original.get("hooks")
     if not isinstance(hooks, dict):
         raise ValueError("hooks.json must contain an object named hooks")
     root = install_root.resolve()
     command = subprocess.list2cmdline([sys.executable, "-B", str(root / "bootstrap.py")])
+    current_target = str(root / "bootstrap.py").replace("/", "\\").casefold()
     replaced: dict[str, int] = {}
     for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        if event not in hooks:
+            hooks[event] = []
         entries = hooks.get(event)
         if not isinstance(entries, list):
             raise ValueError(f"hooks.{event} must be a list")
@@ -486,13 +554,20 @@ def _replace_owned_hook_table(original: dict[str, Any], install_root: Path) -> t
                 command_values = [hook.get(key) for key in ("command", "commandWindows")]
                 owned = any(
                     isinstance(value, str)
-                    and re.search(r"(?i)codex-command-guard[\\/]v23[\\/]bootstrap\.py(?:\"|')?\s*$", value)
+                    and (
+                        re.search(r"(?i)codex-command-guard[\\/]v23[\\/]bootstrap\.py(?:\"|')?\s*$", value)
+                        or value.rstrip("\"' ").replace("/", "\\").casefold().endswith(current_target)
+                    )
                     for value in command_values
                 )
                 if owned:
                     found.append((entry_index, hook_index, hook))
-        if len(found) != 1:
-            raise ValueError(f"Expected one exact v23 hook entry for {event}, found {len(found)}")
+        if len(found) > 1:
+            raise ValueError(f"Expected at most one exact toolkit hook handler for {event}, found {len(found)}")
+        if not found:
+            entries.append(_new_hook_entry(event, command))
+            replaced[event] = len(entries) - 1
+            continue
         entry_index, hook_index, hook = found[0]
         if hook.get("type") != "command":
             raise ValueError(f"Owned {event} hook has an unsupported type")
@@ -506,7 +581,7 @@ def _replace_owned_hook_table(original: dict[str, Any], install_root: Path) -> t
     return original, replaced
 
 
-def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_agents_hash: str, plan_only: bool = False, expected_skill_sha256: str | None = None) -> dict[str, Any]:
+def install(config_dir: Path, source: Path, expected_hooks_hash: str | None = None, expected_agents_hash: str | None = None, plan_only: bool = False, expected_skill_sha256: str | None = None) -> dict[str, Any]:
     """Install with full preflight, snapshots, owned-change rollback on failure."""
     config_dir = _absolute_lexical(config_dir)
     _reject_reparse_components(config_dir)
@@ -515,18 +590,37 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
     source = source.resolve()
     if not source.is_dir():
         raise ValueError("Candidate source directory is missing")
-    original_hooks = _expected_hash(hooks_path, expected_hooks_hash)
-    original_agents = _expected_hash(agents_path, expected_agents_hash)
+    _reject_reparse_components(hooks_path, owned_root=config_dir)
+    _reject_reparse_components(agents_path, owned_root=config_dir)
+    original_hooks = _snapshot_config_file(hooks_path, expected_hooks_hash)
+    original_agents = _snapshot_config_file(agents_path, expected_agents_hash)
     skill_path: Path | None = None
     original_skill: bytes | None = None
     updated_skill: bytes | None = None
-    if expected_skill_sha256 is not None:
-        skill_path = config_dir / "skills" / "windows-command-preflight" / "SKILL.md"
-        original_skill = _expected_hash(skill_path, expected_skill_sha256)
+    skill_candidate = config_dir / "skills" / "windows-command-preflight" / "SKILL.md"
+    _reject_reparse_components(skill_candidate, owned_root=config_dir)
+    try:
+        skill_info = skill_candidate.lstat()
+    except FileNotFoundError:
+        if expected_skill_sha256 is not None:
+            raise ValueError(f"Precondition failed for {skill_candidate}: file is missing.")
+        skill_path = skill_candidate
+    else:
+        if not stat.S_ISREG(skill_info.st_mode):
+            raise ValueError("Existing preflight skill is not a regular file")
+        if expected_skill_sha256 is not None:
+            skill_path = skill_candidate
+            original_skill = _expected_hash(skill_candidate, expected_skill_sha256)
     if source == config_dir.resolve() or config_dir.resolve() in source.parents:
         raise ValueError("Source and destination layout is unsafe")
-    hooks_obj = json.loads(_decode(original_hooks))
-    agents_text = _decode(original_agents)
+    if original_hooks is None:
+        hooks_obj: dict[str, Any] = {"hooks": {}}
+    else:
+        parsed_hooks = json.loads(_decode(original_hooks))
+        if not isinstance(parsed_hooks, dict):
+            raise ValueError("hooks.json must contain a JSON object")
+        hooks_obj = parsed_hooks
+    agents_text = _decode(original_agents) if original_agents is not None else ""
     if MANAGED_MARKER in agents_text or END_MARKER in agents_text:
         raise ValueError("AGENTS.md already contains a managed v24 block")
     source_files = [
@@ -552,12 +646,15 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
         updated_skill = _skill_pointer_bytes(install_root)
     updated_hooks, replaced_hooks = _replace_owned_hook_table(hooks_obj, install_root)
     block = (
-        f"\n{MANAGED_MARKER}\n"
+        f"{MANAGED_MARKER}\n"
         "For Windows commands, check the execution surface, working directory, runtime, literal paths, syntax, and expected result count. Use profile-free non-interactive PowerShell for cmdlets. Report failures and verify the replacement. Keep the existing Wippy Makefile and local port rules.\n"
         f"Read the detailed preflight at `{install_root / 'skills' / 'windows-command-preflight' / 'SKILL.md'}` and command recipes at `{install_root / 'recipes.md'}`.\n"
         f"{END_MARKER}\n"
     )
-    updated_agents = (agents_text.rstrip("\r\n") + block).encode("utf-8")
+    newline = "\r\n" if "\r\n" in agents_text else "\n"
+    separator = "" if not agents_text or agents_text.endswith(("\n", "\r")) else newline
+    agents_bom = b"\xef\xbb\xbf" if original_agents is not None and original_agents.startswith(b"\xef\xbb\xbf") else b""
+    updated_agents = agents_bom + (agents_text + separator + block.replace("\n", newline)).encode("utf-8")
     updated_hooks_raw = _json_bytes(updated_hooks)
     package_hashes = {
         filename: _digest(_read(source / filename))
@@ -567,7 +664,7 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
         "outcome": "planned",
         "changes": [
             {"path": str(install_root), "operation": "create package files", "file_count": len(source_files)},
-            {"path": str(hooks_path), "operation": "replace existing v23 guard commands in place", "events": replaced_hooks},
+            {"path": str(hooks_path), "operation": "add or update one toolkit handler per event", "events": replaced_hooks},
             {"path": str(agents_path), "operation": "append short Windows preflight pointer"},
         ],
         "preserved": "all other hook entries, matchers, GitKraken entries, and hook state remain as found",
@@ -576,18 +673,20 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
         "candidate_commands_executed": False,
     }
     if skill_path is not None:
-        plan["changes"].append({"path": str(skill_path), "operation": "replace existing skill with a short pointer to installed detailed guidance"})
+        operation = "create a short pointer to installed detailed guidance" if original_skill is None else "replace existing skill with a short pointer to installed detailed guidance"
+        plan["changes"].append({"path": str(skill_path), "operation": operation})
     if plan_only:
         return plan
     transaction_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     transaction = config_dir / "hooks" / "codex-windows-prevention" / "transactions" / transaction_id
-    transaction.mkdir(parents=True, exist_ok=False)
     files = {
-        str(hooks_path): {"before": _digest(original_hooks), "after": _digest(updated_hooks_raw), "backup": "hooks.json.before"},
-        str(agents_path): {"before": _digest(original_agents), "after": _digest(updated_agents), "backup": "AGENTS.md.before"},
+        str(hooks_path): {"before_exists": original_hooks is not None, "before": _digest(original_hooks) if original_hooks is not None else None, "after": _digest(updated_hooks_raw), "backup": "hooks.json.before"},
+        str(agents_path): {"before_exists": original_agents is not None, "before": _digest(original_agents) if original_agents is not None else None, "after": _digest(updated_agents), "backup": "AGENTS.md.before"},
     }
-    if skill_path is not None and original_skill is not None and updated_skill is not None:
-        files[str(skill_path)] = {"before": _digest(original_skill), "after": _digest(updated_skill), "backup": "SKILL.md.before"}
+    if skill_path is not None and updated_skill is not None:
+        files[str(skill_path)] = {"before_exists": original_skill is not None, "before": _digest(original_skill) if original_skill is not None else None, "after": _digest(updated_skill), "backup": "SKILL.md.before"}
+    _verify_transaction_files(transaction, files, set(), verify_backups=False)
+    transaction.mkdir(parents=True, exist_ok=False)
     snapshot = {
         "version": VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -597,8 +696,10 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
         "config_dir": str(config_dir),
         "package_files": package_hashes,
     }
-    (transaction / "hooks.json.before").write_bytes(original_hooks)
-    (transaction / "AGENTS.md.before").write_bytes(original_agents)
+    if original_hooks is not None:
+        (transaction / "hooks.json.before").write_bytes(original_hooks)
+    if original_agents is not None:
+        (transaction / "AGENTS.md.before").write_bytes(original_agents)
     if skill_path is not None and original_skill is not None:
         (transaction / "SKILL.md.before").write_bytes(original_skill)
     _write_atomic(transaction / "plan.json", _json_bytes(plan))
@@ -618,16 +719,25 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
                 raise OSError(f"Package read-back mismatch for {filename}")
         _verify_owned_tree(install_root, package_hashes, owned_root=config_dir)
         _verify_transaction_files(transaction, files, set())
-        _write_atomic(hooks_path, updated_hooks_raw)
+        if original_hooks is None:
+            _write_new(hooks_path, updated_hooks_raw)
+        else:
+            _write_atomic(hooks_path, updated_hooks_raw)
         written.append(hooks_path)
         written_text = {str(path) for path in written}
         _verify_transaction_files(transaction, files, written_text)
-        _write_atomic(agents_path, updated_agents)
+        if original_agents is None:
+            _write_new(agents_path, updated_agents)
+        else:
+            _write_atomic(agents_path, updated_agents)
         written.append(agents_path)
         written_text = {str(path) for path in written}
         _verify_transaction_files(transaction, files, written_text)
         if skill_path is not None and updated_skill is not None:
-            _write_atomic(skill_path, updated_skill)
+            if original_skill is None:
+                _write_new(skill_path, updated_skill)
+            else:
+                _write_atomic(skill_path, updated_skill)
             written.append(skill_path)
             written_text = {str(path) for path in written}
             _verify_transaction_files(transaction, files, written_text)
@@ -644,15 +754,22 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str, expected_a
             try:
                 if _digest(_read(path)) == expected:
                     details = snapshot["files"][str(path)]
-                    backup_path = transaction / details["backup"]
-                    backup = _read(backup_path)
-                    if _digest(backup) != details["before"]:
-                        residual.append(str(path))
-                        continue
-                    _write_atomic(path, backup)
+                    if details.get("before_exists", True):
+                        backup_path = transaction / details["backup"]
+                        backup = _read(backup_path)
+                        if _digest(backup) != details["before"]:
+                            residual.append(str(path))
+                            continue
+                        _write_atomic(path, backup)
+                    else:
+                        _reject_reparse_components(path, owned_root=config_dir)
+                        if _matches_file_state(path, exists=True, digest=expected):
+                            path.unlink()
+                        else:
+                            residual.append(str(path))
                 else:
                     residual.append(str(path))
-            except OSError:
+            except (OSError, ValueError):
                 residual.append(str(path))
         try:
             _reject_reparse_components(install_root, owned_root=config_dir)
@@ -697,7 +814,7 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
         raise ValueError("Transaction contains paths outside its supported config files")
     if not Path(metadata.get("install_root", "")).is_absolute() or _absolute_lexical(Path(metadata.get("install_root", ""))) != expected_install_root:
         raise ValueError("Transaction install path is outside its supported destination")
-    preflight: list[tuple[Path, bytes, bytes, str, Path]] = []
+    preflight: list[tuple[Path, bytes, bytes | None, str | None, Path, bool]] = []
     expected_package = metadata.get("package_files")
     if not isinstance(expected_package, dict) or any(not isinstance(key, str) or Path(key).is_absolute() or ".." in Path(key).parts for key in expected_package):
         raise ValueError("Transaction package inventory is invalid")
@@ -712,6 +829,9 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
         current = _read(path)
         if _digest(current) != data.get("after"):
             raise ValueError(f"Rollback precondition failed for {path}; installed bytes changed")
+        existed_before = data.get("before_exists", True)
+        if not isinstance(existed_before, bool):
+            raise ValueError(f"Transaction existence flag is invalid for {path}")
         backup_name = data.get("backup")
         if path == expected_hooks_path:
             expected_backup = "hooks.json.before"
@@ -724,28 +844,51 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
         if backup_name != expected_backup:
             raise ValueError(f"Transaction backup path is invalid for {path}")
         backup_path = transaction_dir / backup_name
-        _reject_reparse_components(backup_path, owned_root=transaction_dir)
-        backup = _read(backup_path)
-        if _digest(backup) != data.get("before"):
-            raise ValueError(f"Transaction backup check failed for {path}")
-        preflight.append((path, current, backup, data["before"], backup_path))
+        if existed_before:
+            _reject_reparse_components(backup_path, owned_root=transaction_dir)
+            backup = _read(backup_path)
+            if _digest(backup) != data.get("before"):
+                raise ValueError(f"Transaction backup check failed for {path}")
+            before_hash = data.get("before")
+            if not isinstance(before_hash, str):
+                raise ValueError(f"Transaction prior hash is invalid for {path}")
+        else:
+            if data.get("before") is not None:
+                raise ValueError(f"Transaction prior state is invalid for {path}")
+            backup = None
+            before_hash = None
+        preflight.append((path, current, backup, before_hash, backup_path, existed_before))
     restored: list[Path] = []
     try:
         restored_set: set[Path] = set()
-        for path, expected_current, backup, before_hash, backup_path in preflight:
-            for candidate, candidate_current, candidate_backup, candidate_before, candidate_backup_path in preflight:
-                expected_live = candidate_backup if candidate in restored_set else candidate_current
-                if _digest(_read(candidate)) != _digest(expected_live):
+        for path, expected_current, backup, before_hash, backup_path, existed_before in preflight:
+            for candidate, candidate_current, candidate_backup, candidate_before, candidate_backup_path, candidate_existed in preflight:
+                if candidate in restored_set and not candidate_existed:
+                    matches = _matches_file_state(candidate, exists=False)
+                else:
+                    expected_live = candidate_backup if candidate in restored_set else candidate_current
+                    matches = expected_live is not None and _matches_file_state(candidate, exists=True, digest=_digest(expected_live))
+                if not matches:
                     raise ValueError(f"Rollback target changed after preflight: {candidate}")
-                if _digest(_read(candidate_backup_path)) != candidate_before:
+                if candidate_existed and (candidate_backup is None or _digest(_read(candidate_backup_path)) != candidate_before):
                     raise ValueError(f"Rollback backup changed after preflight: {candidate.name}")
             _verify_owned_tree(install_root, expected_package, owned_root=config_dir)
             _reject_reparse_components(path, owned_root=config_dir)
-            _write_atomic(path, backup)
+            if existed_before:
+                if backup is None:
+                    raise ValueError(f"Transaction backup is missing for {path}")
+                _write_atomic(path, backup)
+            else:
+                if not _matches_file_state(path, exists=True, digest=_digest(expected_current)):
+                    raise ValueError(f"Rollback target changed after preflight: {path}")
+                path.unlink()
             restored.append(path)
             restored_set.add(path)
-        for path, _, backup, _, _ in preflight:
-            if _digest(_read(path)) != _digest(backup):
+        for path, _, backup, _, _, existed_before in preflight:
+            if existed_before:
+                if backup is None or _digest(_read(path)) != _digest(backup):
+                    raise OSError(f"Read-back mismatch for {path}")
+            elif not _matches_file_state(path, exists=False):
                 raise OSError(f"Read-back mismatch for {path}")
     except BaseException as error:
         raise RuntimeError(f"Rollback incomplete after {type(error).__name__}; restored paths: {[str(p) for p in restored]}") from error
@@ -757,7 +900,7 @@ def rollback(transaction_dir: Path) -> dict[str, Any]:
 
 
 def _emit(value: Any) -> None:
-    sys.stdout.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.write(json.dumps(value, ensure_ascii=True, separators=(",", ":")) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -777,8 +920,8 @@ def main(argv: list[str] | None = None) -> int:
     install_parser = sub.add_parser("install")
     install_parser.add_argument("--config-dir", type=Path, required=True)
     install_parser.add_argument("--source", type=Path, default=ROOT)
-    install_parser.add_argument("--expected-hooks-sha256", required=True)
-    install_parser.add_argument("--expected-agents-sha256", required=True)
+    install_parser.add_argument("--expected-hooks-sha256")
+    install_parser.add_argument("--expected-agents-sha256")
     install_parser.add_argument("--expected-skill-sha256")
     install_parser.add_argument("--plan-only", action="store_true")
     rollback_parser = sub.add_parser("rollback")

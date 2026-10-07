@@ -23,13 +23,14 @@ clients.
 
 ## Quick start
 
-Requires Windows and Python, with no third-party Python packages. Run these
-commands from the toolkit directory:
+Requires Windows and Python 3.10 or newer. No third-party Python packages are
+needed. Run these commands from the toolkit directory:
 
 ```powershell
 python windows_prevention.py doctor
 python windows_prevention.py recommend --list-recipes
-python windows_prevention.py install --help
+python windows_prevention.py install --config-dir "$HOME\.codex" --plan-only
+python windows_prevention.py install --config-dir "$HOME\.codex"
 ```
 
 `recommend` offers recipes and checks command text against known rules.
@@ -38,13 +39,26 @@ PowerShell parser. Neither command runs the proposed command or script.
 
 ## Install and rollback
 
-The installer upgrades an existing v23 hook set only. It requires an explicit
-Codex configuration directory and the current hashes for `hooks.json` and
-`AGENTS.md`. It checks inputs, saves byte-exact backups, preserves unrelated
-hook entries and trust state, and reads changed files back. Fresh setups need
-reviewed hook entries. Review installed hooks through Codex's normal trust
-flow. Rollback restores only owned files that still match their recorded
-hashes.
+No earlier hook installation is required. The installer creates missing hook,
+prompt, and skill files. It also supports existing settings and upgrades v23
+hooks in place. If you use `CODEX_HOME`, pass that directory instead of
+`$HOME\.codex`.
+
+The installer checks for concurrent changes, saves byte-exact backups, and
+preserves unrelated hooks, prompt text, settings, and trust state. An existing
+preflight skill stays unchanged unless you supply its current hash. Review new
+or changed hooks through Codex's normal trust flow. Installation does not grant
+trust or enable disabled hooks.
+
+The install result includes a transaction path. Use it to undo the install:
+
+```powershell
+python windows_prevention.py rollback --transaction "<transaction path>"
+```
+
+Rollback restores prior bytes and removes files that the installer created.
+It refuses to overwrite later changes. Optional hash checks are available
+through `install --help`.
 
 Static hooks cannot prove test coverage, command results, executable
 availability, output content, or runtime behavior. See [recipes.md](recipes.md)
@@ -53,6 +67,5 @@ records, [NOTICE.md](NOTICE.md) for provenance, and [LICENSE](LICENSE) for the
 license terms.
 
 [Process Manager for Windows](https://github.com/AndrewKirkovski/claude-code-bg-process-manager-windows)
-is a separate shared service for command execution, routing, output
-normalization, and process control. Its client guidance does not define Codex
-policy.
+is an optional shared service for command execution, routing, output
+normalization, and process control.
