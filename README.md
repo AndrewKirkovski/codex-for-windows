@@ -1,10 +1,8 @@
 # Windows command prevention for Codex
 
-## Why it exists
-
 Codex can choose the wrong Windows shell or runtime, or mishandle paths and
-quotes. Repeating failed commands wastes time and tokens. This toolkit helps
-Codex construct and check commands before execution.
+quotes. The toolkit provides instructions for constructing Windows commands
+and hooks that reject known errors before execution.
 
 ## What it does
 
@@ -13,16 +11,15 @@ Codex construct and check commands before execution.
 | Short global prompt | Points Codex to the detailed Windows skill. |
 | Skill and recipes | Guide paths, quoting, runtimes, edits, tests, and process control. |
 | CLI | Checks commands, detects the installation, and manages updates and rollback. |
-| Hooks | Provide a final boundary and pass valid calls silently. |
+| Hooks | Reject known command errors and produce no output for valid calls. |
 
-The rules apply to Codex. They do not set policy for other clients.
 `recommend` and `validate` inspect commands or scripts without executing them.
 
 ## Install
 
-Requires Windows and Python 3.10 or newer. No earlier hooks, Git installation,
-or third-party Python packages are required. Keep the whole toolkit folder;
-the CLI uses its bundled files. Run from that folder:
+Requires Windows and Python 3.10 or newer.
+
+Download the complete toolkit folder and run from that folder:
 
 ```powershell
 python windows_prevention.py doctor
@@ -34,17 +31,18 @@ Commands use `CODEX_HOME`, the configuration detected from an installed copy,
 or `$HOME\.codex`, in that order. `--config-dir` selects another directory.
 
 Installation creates missing files and preserves unrelated hooks, prompt
-text, settings, and existing user skills. It also supports v23 migration.
-Review new or changed hooks through Codex's normal trust flow. Installation
-does not grant trust or enable disabled hooks.
+text, settings, and existing user skills. Review new or changed hooks through
+Codex's normal trust flow. Disabled hooks remain disabled.
 
-## Check, update, and undo
+## Check installation
 
 Check the active installation without writing files:
 
 ```powershell
 python windows_prevention.py status
 ```
+
+## Update
 
 Download and review a newer toolkit folder, then update from it:
 
@@ -54,8 +52,10 @@ python windows_prevention.py update --source "<reviewed toolkit folder>"
 ```
 
 Updates keep the previous package for rollback. An identical update writes
-nothing. Changed owned files or conflicting hooks stop the update before
-writes. The toolkit does not download or run new code automatically.
+nothing. The update stops if installed toolkit files or its hook definitions
+have changed.
+
+## Rollback
 
 Install and update return a transaction path. Use it to undo that operation:
 
@@ -63,8 +63,8 @@ Install and update return a transaction path. Use it to undo that operation:
 python windows_prevention.py rollback --transaction "<transaction path>"
 ```
 
-Rollback restores prior bytes and removes installer-created files only while
-their recorded state still matches. It refuses to overwrite later changes.
+Rollback restores saved files and removes files created by installation.
+It stops if a file has changed since the install or update.
 
 ## Details and limits
 
