@@ -127,9 +127,11 @@ Use [the Windows command recipes](../../recipes.md) for inspected patterns for
 source reads, literal and glob searches, native commands, script syntax checks,
 structured data, result counts, prerequisites, tests, and process control.
 
-Use `windows_prevention.py doctor` to inspect local runtime metadata. Multiple
-lookup results require an explicit choice of a verified executable. Keep local
-machine paths in an ignored profile, not in portable instructions.
+Resolve [the bundled CLI](../../windows_prevention.py) to its exact file path
+before running it. Use `doctor` to inspect local runtime metadata when selecting
+or changing a runtime. Multiple lookup results require an explicit choice of a
+verified executable. Keep local machine paths in an ignored profile, not in
+portable instructions.
 
 Use `recommend --list-recipes` or `recommend --recipe <id>` for a small recipe.
 Use `recommend --payload <file>` to check known hook rules. A `clear_unverified`
@@ -162,6 +164,11 @@ checks. The hook cannot prove schema validity, test coverage, process health,
 or output content from a command string.
 
 Keep shared-write and approval decisions in the task conversation. Command
-analysis does not grant approval or infer consent. Installation needs exact
-current hashes, inspected changes, byte-exact backups, and read-back checks.
-Hook trust and disabled-hook state remain under the normal Codex review flow.
+analysis does not grant approval or infer consent. Installation and update use
+current file snapshots, inspected changes, byte-exact backups, and read-back
+checks. Manually supplied hashes are optional and remain enforced when given.
+Use `status` to inspect the installation before maintenance, and `--plan-only`
+to inspect a proposed install or update without writes. These checks are not
+required before each ordinary command. See [toolkit maintenance](../../recipes.md#manage-the-toolkit)
+for config discovery, update, and rollback. Hook trust and disabled-hook state
+remain under the normal Codex review flow.

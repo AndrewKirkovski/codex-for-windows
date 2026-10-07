@@ -5,6 +5,29 @@ value. These recipes do not execute the command you want to review. Use
 `prepare_command` for uncertain managed runner routes, when that tool is
 available. Simple verified native commands need no preview call.
 
+## Manage the toolkit
+
+Keep the whole toolkit folder. Resolve `windows_prevention.py` from the bundle
+or installed package before running it; its other files are relative to that
+location. No repository checkout or Process Manager connection is required.
+
+`status` reads the active installation without writes. `install --plan-only`
+and `update --source <reviewed-toolkit-directory> --plan-only` show proposed
+changes without writes. Config selection uses explicit `--config-dir`, then
+`CODEX_HOME`, the detected installed package location, and finally
+`$HOME\.codex`. Use `--config-dir` for an inactive configuration.
+
+First installation needs no earlier hooks or manually supplied hashes.
+Updates use a reviewed local toolkit folder and retain the previous package.
+An unchanged candidate produces a no-write result. The CLI checks owned files
+and current snapshots before writes, then verifies the output. It does not
+fetch updates or grant hook trust. Review changed hooks in Codex.
+
+Use the transaction path returned by install or update with
+`rollback --transaction <path>`. Rollback requires the current owned state to
+match its record. It restores previous bytes, removes matching created files,
+and preserves unrelated user content.
+
 ## Read source text
 
 Use profile-free host PowerShell for local cmdlets.

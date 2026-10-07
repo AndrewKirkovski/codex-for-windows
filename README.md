@@ -4,68 +4,73 @@
 
 Codex can choose the wrong Windows shell or runtime, or mishandle paths and
 quotes. Repeating failed commands wastes time and tokens. This toolkit helps
-Codex construct and check commands before it runs them.
+Codex construct and check commands before execution.
 
-## Prevention comes first
-
-A short global Codex prompt points to the Windows preflight skill. The skill and
-tested recipes guide command construction, runtime selection, paths, quoting,
-editing, and process lifecycle.
+## What it does
 
 | Part | Purpose |
 | --- | --- |
-| Prompt, skill, and recipes | Prevent command errors before execution. |
-| `windows_prevention.py` CLI | Check the environment, recommend commands, and validate scripts. |
-| Hooks | Serve as the last boundary and pass valid calls silently. |
+| Short global prompt | Points Codex to the detailed Windows skill. |
+| Skill and recipes | Guide paths, quoting, runtimes, edits, tests, and process control. |
+| CLI | Checks commands, detects the installation, and manages updates and rollback. |
+| Hooks | Provide a final boundary and pass valid calls silently. |
 
-These rules apply to Codex. They do not set policy for other Process Manager
-clients.
+The rules apply to Codex. They do not set policy for other clients.
+`recommend` and `validate` inspect commands or scripts without executing them.
 
-## Quick start
+## Install
 
-Requires Windows and Python 3.10 or newer. No third-party Python packages are
-needed. Run these commands from the toolkit directory:
+Requires Windows and Python 3.10 or newer. No earlier hooks, Git installation,
+or third-party Python packages are required. Keep the whole toolkit folder;
+the CLI uses its bundled files. Run from that folder:
 
 ```powershell
 python windows_prevention.py doctor
-python windows_prevention.py recommend --list-recipes
-python windows_prevention.py install --config-dir "$HOME\.codex" --plan-only
-python windows_prevention.py install --config-dir "$HOME\.codex"
+python windows_prevention.py install --plan-only
+python windows_prevention.py install
 ```
 
-`recommend` offers recipes and checks command text against known rules.
-`validate` checks a reviewed script with the selected
-PowerShell parser. Neither command runs the proposed command or script.
+Commands use `CODEX_HOME`, the configuration detected from an installed copy,
+or `$HOME\.codex`, in that order. `--config-dir` selects another directory.
 
-## Install and rollback
+Installation creates missing files and preserves unrelated hooks, prompt
+text, settings, and existing user skills. It also supports v23 migration.
+Review new or changed hooks through Codex's normal trust flow. Installation
+does not grant trust or enable disabled hooks.
 
-No earlier hook installation is required. The installer creates missing hook,
-prompt, and skill files. It also supports existing settings and upgrades v23
-hooks in place. If you use `CODEX_HOME`, pass that directory instead of
-`$HOME\.codex`.
+## Check, update, and undo
 
-The installer checks for concurrent changes, saves byte-exact backups, and
-preserves unrelated hooks, prompt text, settings, and trust state. An existing
-preflight skill stays unchanged unless you supply its current hash. Review new
-or changed hooks through Codex's normal trust flow. Installation does not grant
-trust or enable disabled hooks.
+Check the active installation without writing files:
 
-The install result includes a transaction path. Use it to undo the install:
+```powershell
+python windows_prevention.py status
+```
+
+Download and review a newer toolkit folder, then update from it:
+
+```powershell
+python windows_prevention.py update --source "<reviewed toolkit folder>" --plan-only
+python windows_prevention.py update --source "<reviewed toolkit folder>"
+```
+
+Updates keep the previous package for rollback. An identical update writes
+nothing. Changed owned files or conflicting hooks stop the update before
+writes. The toolkit does not download or run new code automatically.
+
+Install and update return a transaction path. Use it to undo that operation:
 
 ```powershell
 python windows_prevention.py rollback --transaction "<transaction path>"
 ```
 
-Rollback restores prior bytes and removes files that the installer created.
-It refuses to overwrite later changes. Optional hash checks are available
-through `install --help`.
+Rollback restores prior bytes and removes installer-created files only while
+their recorded state still matches. It refuses to overwrite later changes.
 
-Static hooks cannot prove test coverage, command results, executable
-availability, output content, or runtime behavior. See [recipes.md](recipes.md)
-for command and parser details, [evidence.md](evidence.md) for test and research
-records, [NOTICE.md](NOTICE.md) for provenance, and [LICENSE](LICENSE) for the
-license terms.
+## Details and limits
+
+Hooks cannot prove test coverage, command results, output content, or process
+health. See [recipes](recipes.md), [verification evidence](evidence.md),
+[attribution](NOTICE.md), and [MIT license](LICENSE).
 
 [Process Manager for Windows](https://github.com/AndrewKirkovski/claude-code-bg-process-manager-windows)
-is an optional shared service for command execution, routing, output
-normalization, and process control.
+is optional. It handles command routing, output, and process control.

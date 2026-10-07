@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -19,6 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
 
 import guard
 
@@ -499,6 +503,344 @@ def _skill_pointer_bytes(install_root: Path) -> bytes:
     return text.encode("utf-8")
 
 
+def _package_file_names(source: Path) -> list[str]:
+    names = [
+        "windows_prevention.py", "guard.py", "bootstrap.py", "ps_parse_helper.ps1",
+        "manifest.json", "README.md", "NOTICE.md", "LICENSE", "templates.json", "recipes.md",
+        "manifest-v23-source.json", "audit_summary.json", "evidence.md", "evidence-references.json",
+        "skills/windows-command-preflight/SKILL.md",
+    ]
+    fixtures = source / "fixtures"
+    if fixtures.exists():
+        names.extend(sorted(path.relative_to(source).as_posix() for path in fixtures.rglob("*") if path.is_file()))
+    return names
+
+
+def _package_hashes(source: Path) -> dict[str, str]:
+    names = _package_file_names(source)
+    for name in names:
+        if not (source / name).is_file():
+            raise ValueError(f"Candidate file is missing: {name}")
+    return {name: _digest(_read(source / name)) for name in names}
+
+
+def _package_id(package_files: dict[str, str]) -> str:
+    canonical = json.dumps(package_files, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return _digest(canonical)
+
+
+def _manager_root(config_dir: Path) -> Path:
+    return config_dir / "hooks" / "codex-windows-prevention"
+
+
+def _active_record_path(config_dir: Path) -> Path:
+    return _manager_root(config_dir) / "active.json"
+
+
+def _config_from_package_root(package_root: Path) -> Path | None:
+    root = _absolute_lexical(package_root)
+    manager: Path | None = None
+    if root.parent.name.casefold() == "codex-windows-prevention":
+        manager = root.parent
+    elif root.parent.name.casefold() == "revisions" and root.parent.parent.name.casefold() == "codex-windows-prevention":
+        manager = root.parent.parent
+    if manager is None or manager.parent.name.casefold() != "hooks":
+        return None
+    return manager.parent.parent
+
+
+def _resolve_config_dir(value: Path | None = None) -> Path:
+    if value is not None:
+        return _absolute_lexical(value)
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        return _absolute_lexical(Path(codex_home))
+    installed = _config_from_package_root(ROOT)
+    return installed if installed is not None else _absolute_lexical(Path.home() / ".codex")
+
+
+def _resolve_source(value: Path | None) -> Path:
+    if value is None:
+        return ROOT.resolve()
+    return (value if value.is_absolute() else ROOT / value).resolve()
+
+
+def _managed_block(install_root: Path) -> str:
+    return (
+        f"{MANAGED_MARKER}\n"
+        "For Windows commands, check the execution surface, working directory, runtime, literal paths, syntax, and expected result count. Use profile-free non-interactive PowerShell for cmdlets. Report failures and verify the replacement. Keep the existing Wippy Makefile and local port rules.\n"
+        f"Read the detailed preflight at `{install_root / 'skills' / 'windows-command-preflight' / 'SKILL.md'}` and command recipes at `{install_root / 'recipes.md'}`.\n"
+        f"{END_MARKER}\n"
+    )
+
+
+def _extract_managed_block(text: str) -> tuple[int, int, str]:
+    if text.count(MANAGED_MARKER) != 1 or text.count(END_MARKER) != 1:
+        raise ValueError("Managed AGENTS block is missing or duplicated")
+    start = text.index(MANAGED_MARKER)
+    end_marker = text.index(END_MARKER, start)
+    if end_marker < start:
+        raise ValueError("Managed AGENTS block is malformed")
+    end = end_marker + len(END_MARKER)
+    if text[end:end + 2] == "\r\n":
+        end += 2
+    elif text[end:end + 1] in {"\r", "\n"}:
+        end += 1
+    return start, end, text[start:end].replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _extract_owned_root(command: object) -> Path | None:
+    if not isinstance(command, str):
+        return None
+    try:
+        tokens = [token.strip("\"'") for token in shlex.split(command, posix=False)]
+    except ValueError as error:
+        if re.search(r"(?i)codex-(?:windows-prevention|command-guard).*bootstrap\.py", command):
+            raise ValueError("Malformed toolkit handler command") from error
+        return None
+    path_pattern = re.compile(
+        r"(?i)^([a-z]:\\.*\\(?:codex-windows-prevention\\(?:v24|revisions\\[0-9a-f]{64})|codex-command-guard\\v23))\\bootstrap\.py$"
+    )
+    for token in tokens:
+        normalized = token.replace("/", "\\")
+        match = path_pattern.fullmatch(normalized)
+        if match is not None:
+            return _absolute_lexical(Path(match.group(0))).parent
+        if re.search(r"(?i)codex-(?:windows-prevention|command-guard).*bootstrap\.py", normalized):
+            raise ValueError("Malformed toolkit handler script path")
+    return None
+
+
+def _managed_handler_command(command: object, install_root: Path) -> bool:
+    if not isinstance(command, str):
+        return False
+    try:
+        parts = [part.strip("\"'") for part in shlex.split(command, posix=False)]
+    except ValueError:
+        return False
+    if len(parts) != 3 or parts[1].casefold() != "-b":
+        return False
+    if not re.fullmatch(r"(?i)python(?:w|[0-9.]*)?\.exe", Path(parts[0]).name):
+        return False
+    script = _absolute_lexical(Path(parts[2]))
+    expected = _absolute_lexical(install_root / "bootstrap.py")
+    return os.path.normcase(str(script)) == os.path.normcase(str(expected))
+
+
+def _owned_handlers(hooks_obj: dict[str, Any]) -> tuple[dict[str, list[tuple[dict[str, Any], dict[str, Any]]]], set[Path]]:
+    by_event: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    roots: set[Path] = set()
+    hooks = hooks_obj.get("hooks")
+    if not isinstance(hooks, dict):
+        return by_event, roots
+    for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        found: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        entries = hooks.get(event, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"hooks.{event} must be a list")
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for handler in entry["hooks"]:
+                if not isinstance(handler, dict):
+                    continue
+                candidates = [_extract_owned_root(handler.get(key)) for key in ("command", "commandWindows")]
+                roots.update(root for root in candidates if root is not None)
+                if any(root is not None for root in candidates):
+                    found.append((entry, handler))
+        by_event[event] = found
+    for event, entries in hooks.items():
+        if event in by_event or not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+                continue
+            for handler in entry["hooks"]:
+                if isinstance(handler, dict) and any(_extract_owned_root(handler.get(key)) is not None for key in ("command", "commandWindows")):
+                    raise ValueError(f"Toolkit handler found in unsupported hook event: {event}")
+    return by_event, roots
+
+
+def _owned_handler_snapshot(hooks_obj: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    handlers, _ = _owned_handlers(hooks_obj)
+    snapshot: dict[str, dict[str, Any]] = {}
+    for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        if len(handlers.get(event, [])) != 1:
+            raise ValueError(f"Cannot record ambiguous {event} handler fields")
+        entry, handler = handlers[event][0]
+        if handler.get("type") != "command":
+            raise ValueError(f"Owned {event} handler has an unsupported type")
+        snapshot[event] = {
+            "matcher_present": "matcher" in entry,
+            "matcher": entry.get("matcher"),
+            "handler_fields": {key: value for key, value in handler.items() if key not in {"command", "commandWindows"}},
+        }
+    return snapshot
+
+
+def _verify_owned_handler_snapshot(hooks_obj: dict[str, Any], snapshot: object) -> None:
+    if not isinstance(snapshot, dict):
+        raise ValueError("Owned handler snapshot is invalid")
+    handlers, _ = _owned_handlers(hooks_obj)
+    for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        expected = snapshot.get(event)
+        if not isinstance(expected, dict) or len(handlers.get(event, [])) != 1:
+            raise ValueError(f"Owned {event} handler snapshot is missing or ambiguous")
+        entry, handler = handlers[event][0]
+        if handler.get("type") != "command":
+            raise ValueError(f"Owned {event} handler type changed")
+        if expected.get("matcher_present") != ("matcher" in entry) or expected.get("matcher") != entry.get("matcher"):
+            raise ValueError(f"Owned {event} matcher changed")
+        actual_fields = {key: value for key, value in handler.items() if key not in {"command", "commandWindows"}}
+        if expected.get("handler_fields") != actual_fields:
+            raise ValueError(f"Owned {event} handler fields changed")
+
+
+def _replace_block(text: str, current_root: Path, new_root: Path) -> str:
+    start, end, block = _extract_managed_block(text)
+    if block != _managed_block(current_root):
+        raise ValueError("Managed AGENTS block changed after installation")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    return text[:start] + _managed_block(new_root).replace("\n", newline) + text[end:]
+
+
+def _legacy_install_record(config_dir: Path, install_root: Path) -> dict[str, Any] | None:
+    transaction_root = _manager_root(config_dir) / "transactions"
+    if not transaction_root.is_dir():
+        return None
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for metadata_path in transaction_root.glob("*/transaction.json"):
+        try:
+            _reject_reparse_components(metadata_path, owned_root=_manager_root(config_dir))
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if metadata.get("version") != VERSION or metadata.get("kind") == "revision_update":
+            continue
+        if metadata.get("install_root") != str(install_root):
+            continue
+        package_files = metadata.get("package_files")
+        if isinstance(package_files, dict):
+            try:
+                _verify_owned_tree(install_root, package_files, owned_root=config_dir)
+            except ValueError as error:
+                stale_inventory = (
+                    str(error) == "Owned package inventory changed"
+                    or str(error).startswith((
+                        "Owned package file changed:",
+                        "Owned package contains unknown file:",
+                        "Owned package contains unknown directory:",
+                    ))
+                )
+                if stale_inventory:
+                    continue
+                raise
+            matches.append((metadata_path.parent, metadata))
+    if len(matches) != 1:
+        return None
+    transaction_path, record = matches[0]
+    package_files = record["package_files"]
+    file_records = record.get("files")
+    hooks_record = file_records.get(str(config_dir / "hooks.json")) if isinstance(file_records, dict) else None
+    if not isinstance(hooks_record, dict):
+        raise ValueError("Prior hooks transaction record is invalid")
+    hooks_backup = transaction_path / "hooks.json.before"
+    if hooks_record.get("before_exists", True):
+        hooks_before = json.loads(_decode(_read(hooks_backup)))
+        if _digest(_read(hooks_backup)) != hooks_record.get("before"):
+            raise ValueError("Prior hooks backup changed")
+    else:
+        if hooks_record.get("before") is not None:
+            raise ValueError("Prior hooks absence record is invalid")
+        hooks_before = {"hooks": {}}
+    if not isinstance(hooks_before, dict):
+        raise ValueError("Prior hook snapshot is invalid")
+    expected_hooks, _ = _replace_owned_hook_table(hooks_before, install_root)
+    reconstructed = _owned_handler_snapshot(expected_hooks)
+    recorded = record.get("owned_handlers")
+    if recorded is not None and recorded != reconstructed:
+        raise ValueError("Recorded owned hook fields do not match the transaction plan")
+    record = {**record, "owned_handlers": recorded if isinstance(recorded, dict) else reconstructed}
+    return record
+
+
+def _load_install_record(config_dir: Path, install_root: Path) -> tuple[dict[str, Any], bool]:
+    active_path = _active_record_path(config_dir)
+    try:
+        _reject_reparse_components(active_path, owned_root=config_dir)
+        record = json.loads(active_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        legacy = _legacy_install_record(config_dir, install_root)
+        if legacy is None:
+            raise ValueError("Installed package has no verifiable ownership record")
+        files = legacy.get("files", {})
+        skill = str(config_dir / "skills" / "windows-command-preflight" / "SKILL.md") in files
+        return {
+            "package_root": str(install_root),
+            "package_files": legacy["package_files"],
+            "skill_owned": skill,
+            "owned_handlers": legacy["owned_handlers"],
+        }, False
+    if not isinstance(record, dict) or record.get("format") != "codex-windows-prevention-active-v1":
+        raise ValueError("Active install record is invalid")
+    if record.get("package_root") != str(install_root) or not isinstance(record.get("package_files"), dict):
+        raise ValueError("Active install record does not match the active package")
+    _verify_owned_tree(install_root, record["package_files"], owned_root=config_dir)
+    if not isinstance(record.get("skill_owned"), bool):
+        raise ValueError("Active install skill ownership is invalid")
+    return record, True
+
+
+def status(config_dir: Path | None = None) -> dict[str, Any]:
+    config = _resolve_config_dir(config_dir)
+    hooks_path = config / "hooks.json"
+    agents_path = config / "AGENTS.md"
+    if not config.exists() and not hooks_path.exists() and not agents_path.exists():
+        return {"outcome": "missing", "config_dir": str(config), "writes": 0}
+    if not hooks_path.is_file() or not agents_path.is_file():
+        return {"outcome": "conflicting", "config_dir": str(config), "reason": "configuration files are incomplete", "writes": 0}
+    try:
+        hooks_obj = json.loads(_decode(_read(hooks_path)))
+        if not isinstance(hooks_obj, dict):
+            raise ValueError("hooks.json must contain an object")
+        handlers, roots = _owned_handlers(hooks_obj)
+        agents_text = _decode(_read(agents_path))
+        if not roots and MANAGED_MARKER not in agents_text:
+            return {"outcome": "missing", "config_dir": str(config), "writes": 0}
+        if len(roots) != 1 or any(len(handlers.get(event, [])) != 1 for event in ("SessionStart", "UserPromptSubmit", "PreToolUse")):
+            return {"outcome": "conflicting", "config_dir": str(config), "reason": "owned hooks are missing or duplicated", "writes": 0}
+        root = next(iter(roots))
+        if _config_from_package_root(root) != config:
+            return {"outcome": "conflicting", "config_dir": str(config), "reason": "hook target is outside the active config", "writes": 0}
+        record, _ = _load_install_record(config, root)
+        if "owned_handlers" in record:
+            _verify_owned_handler_snapshot(hooks_obj, record["owned_handlers"])
+        block = _extract_managed_block(_decode(_read(agents_path)))[2]
+        if block != _managed_block(root):
+            return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": "managed AGENTS block changed", "writes": 0}
+        if record["skill_owned"]:
+            skill_path = config / "skills" / "windows-command-preflight" / "SKILL.md"
+            if _read(skill_path) != _skill_pointer_bytes(root):
+                return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": "managed skill pointer changed", "writes": 0}
+        expected_command = record.get("hook_command")
+        if isinstance(expected_command, str):
+            for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+                handler = handlers[event][0][1]
+                if handler.get("command") != expected_command or ("commandWindows" in handler and handler["commandWindows"] != expected_command):
+                    return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": f"managed {event} handler changed", "writes": 0}
+        for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+            handler = handlers[event][0][1]
+            if handler.get("type") != "command":
+                return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": f"managed {event} handler type changed", "writes": 0}
+            if not _managed_handler_command(handler.get("command"), root):
+                return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": f"managed {event} command shape changed", "writes": 0}
+            if "commandWindows" in handler and not _managed_handler_command(handler["commandWindows"], root):
+                return {"outcome": "modified", "config_dir": str(config), "package_root": str(root), "reason": f"managed {event} Windows command shape changed", "writes": 0}
+        return {"outcome": "installed", "config_dir": str(config), "package_root": str(root), "package_sha256": _package_id(record["package_files"]), "skill_owned": record["skill_owned"], "writes": 0}
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as error:
+        return {"outcome": "modified", "config_dir": str(config), "reason": type(error).__name__, "writes": 0}
+
+
 def _verify_transaction_files(transaction: Path, files: dict[str, dict[str, Any]], written: set[str], *, verify_backups: bool = True) -> None:
     for path_text, details in files.items():
         _reject_reparse_components(Path(path_text))
@@ -581,13 +923,13 @@ def _replace_owned_hook_table(original: dict[str, Any], install_root: Path) -> t
     return original, replaced
 
 
-def install(config_dir: Path, source: Path, expected_hooks_hash: str | None = None, expected_agents_hash: str | None = None, plan_only: bool = False, expected_skill_sha256: str | None = None) -> dict[str, Any]:
+def install(config_dir: Path | None = None, source: Path | None = None, expected_hooks_hash: str | None = None, expected_agents_hash: str | None = None, plan_only: bool = False, expected_skill_sha256: str | None = None) -> dict[str, Any]:
     """Install with full preflight, snapshots, owned-change rollback on failure."""
-    config_dir = _absolute_lexical(config_dir)
+    config_dir = _resolve_config_dir(config_dir)
     _reject_reparse_components(config_dir)
     hooks_path = config_dir / "hooks.json"
     agents_path = config_dir / "AGENTS.md"
-    source = source.resolve()
+    source = _resolve_source(source)
     if not source.is_dir():
         raise ValueError("Candidate source directory is missing")
     _reject_reparse_components(hooks_path, owned_root=config_dir)
@@ -695,6 +1037,7 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str | None = No
         "install_root": str(install_root),
         "config_dir": str(config_dir),
         "package_files": package_hashes,
+        "owned_handlers": _owned_handler_snapshot(updated_hooks),
     }
     if original_hooks is not None:
         (transaction / "hooks.json.before").write_bytes(original_hooks)
@@ -784,12 +1127,338 @@ def install(config_dir: Path, source: Path, expected_hooks_hash: str | None = No
     return {**plan, "outcome": "installed", "transaction": str(transaction), "plan_file": str(transaction / "plan.json"), "trust_review": "required through normal Codex hook trust flow"}
 
 
+def update(config_dir: Path | None = None, source: Path | None = None, *, plan_only: bool = False) -> dict[str, Any]:
+    """Switch an owned install to an immutable, content-addressed package revision."""
+    config = _resolve_config_dir(config_dir)
+    _reject_reparse_components(config)
+    candidate = _resolve_source(source)
+    if not candidate.is_dir():
+        raise ValueError("Candidate source directory is missing")
+    candidate_files = _package_hashes(candidate)
+    package_id = _package_id(candidate_files)
+    hooks_path = config / "hooks.json"
+    agents_path = config / "AGENTS.md"
+    active_path = _active_record_path(config)
+    _reject_reparse_components(hooks_path, owned_root=config)
+    _reject_reparse_components(agents_path, owned_root=config)
+    original_hooks = _read(hooks_path)
+    original_agents = _read(agents_path)
+    hooks_obj = json.loads(_decode(original_hooks))
+    if not isinstance(hooks_obj, dict):
+        raise ValueError("hooks.json must contain a JSON object")
+    handlers, roots = _owned_handlers(hooks_obj)
+    if len(roots) != 1 or any(len(handlers.get(event, [])) != 1 for event in ("SessionStart", "UserPromptSubmit", "PreToolUse")):
+        raise ValueError("Update requires one active toolkit handler per event")
+    current_root = next(iter(roots))
+    if _config_from_package_root(current_root) != config:
+        raise ValueError("Active package path does not match the selected configuration directory")
+    record, had_record = _load_install_record(config, current_root)
+    if "owned_handlers" in record:
+        _verify_owned_handler_snapshot(hooks_obj, record["owned_handlers"])
+    agents_text = _decode(original_agents)
+    _, _, current_block = _extract_managed_block(agents_text)
+    if current_block != _managed_block(current_root):
+        raise ValueError("Managed AGENTS block changed after installation")
+    package_files = record["package_files"]
+    if not isinstance(package_files, dict):
+        raise ValueError("Active package inventory is invalid")
+    for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        _, handler = handlers[event][0]
+        if handler.get("type") != "command":
+            raise ValueError(f"Owned {event} handler has an unsupported type")
+        command_root = _extract_owned_root(handler.get("command"))
+        if command_root != current_root:
+            raise ValueError(f"Owned {event} command changed after installation")
+        if not _managed_handler_command(handler.get("command"), current_root):
+            raise ValueError(f"Owned {event} command shape changed after installation")
+        windows_value = handler.get("commandWindows")
+        if windows_value is not None and _extract_owned_root(windows_value) != current_root:
+            raise ValueError(f"Owned {event} Windows command changed after installation")
+        if windows_value is not None and not _managed_handler_command(windows_value, current_root):
+            raise ValueError(f"Owned {event} Windows command shape changed after installation")
+        expected_command = record.get("hook_command")
+        if isinstance(expected_command, str) and (handler.get("command") != expected_command or (windows_value is not None and windows_value != expected_command)):
+            raise ValueError(f"Owned {event} handler fields changed after installation")
+    skill_path = config / "skills" / "windows-command-preflight" / "SKILL.md"
+    skill_owned = record["skill_owned"]
+    original_skill: bytes | None = None
+    if skill_owned:
+        _reject_reparse_components(skill_path, owned_root=config)
+        original_skill = _read(skill_path)
+        if original_skill != _skill_pointer_bytes(current_root):
+            raise ValueError("Toolkit-owned skill pointer changed after installation")
+    active_before: bytes | None = None
+    try:
+        _reject_reparse_components(active_path, owned_root=config)
+        active_before = _read(active_path)
+    except FileNotFoundError:
+        if had_record:
+            raise ValueError("Active install record disappeared")
+    if package_id == _package_id(package_files):
+        return {"outcome": "already_current", "config_dir": str(config), "package_root": str(current_root), "package_sha256": package_id, "writes": 0}
+    new_root = _absolute_lexical(_manager_root(config) / "revisions" / package_id)
+    if new_root == current_root:
+        return {"outcome": "already_current", "config_dir": str(config), "package_root": str(current_root), "package_sha256": package_id, "writes": 0}
+    _reject_reparse_components(new_root, owned_root=config)
+    command = subprocess.list2cmdline([sys.executable, "-B", str(new_root / "bootstrap.py")])
+    hooks_updated = json.loads(json.dumps(hooks_obj))
+    updated_handlers, updated_roots = _owned_handlers(hooks_updated)
+    if updated_roots != {current_root}:
+        raise ValueError("Owned hook inventory changed during update preflight")
+    for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+        _, handler = updated_handlers[event][0]
+        handler["command"] = command
+        if "commandWindows" in handler:
+            handler["commandWindows"] = command
+    hooks_after = _json_bytes(hooks_updated)
+    agents_bom = b"\xef\xbb\xbf" if original_agents.startswith(b"\xef\xbb\xbf") else b""
+    agents_after = agents_bom + _replace_block(agents_text, current_root, new_root).encode("utf-8")
+    skill_after = _skill_pointer_bytes(new_root) if skill_owned else None
+    active_after = _json_bytes({
+        "format": "codex-windows-prevention-active-v1",
+        "package_root": str(new_root),
+        "package_sha256": package_id,
+        "package_files": candidate_files,
+        "hook_command": command,
+        "owned_handlers": _owned_handler_snapshot(hooks_updated),
+        "skill_owned": skill_owned,
+    })
+    transaction_root = _manager_root(config) / "transactions"
+    transaction_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    transaction = transaction_root / transaction_id
+    file_snapshots: dict[str, dict[str, Any]] = {}
+
+    def add_snapshot(path: Path, before: bytes | None, after: bytes, backup_name: str) -> None:
+        file_snapshots[str(path)] = {
+            "before_exists": before is not None,
+            "before": _digest(before) if before is not None else None,
+            "after": _digest(after),
+            "backup": backup_name,
+        }
+
+    add_snapshot(hooks_path, original_hooks, hooks_after, "hooks.json.before")
+    add_snapshot(agents_path, original_agents, agents_after, "AGENTS.md.before")
+    if skill_owned and skill_after is not None:
+        add_snapshot(skill_path, original_skill, skill_after, "SKILL.md.before")
+    add_snapshot(active_path, active_before, active_after, "active.json.before")
+    plan = {
+        "outcome": "planned",
+        "config_dir": str(config),
+        "current_package_root": str(current_root),
+        "package_root": str(new_root),
+        "package_sha256": package_id,
+        "changes": list(file_snapshots),
+        "preserved": "unrelated settings, hook entries, prompt prose, and user-owned skills remain unchanged",
+        "candidate_commands_executed": False,
+    }
+    if plan_only:
+        return plan
+    _verify_transaction_files(transaction, file_snapshots, set(), verify_backups=False)
+    transaction.mkdir(parents=True, exist_ok=False)
+    for path_text, details in file_snapshots.items():
+        before = _read(Path(path_text)) if details["before_exists"] else None
+        if before is not None:
+            (transaction / details["backup"]).write_bytes(before)
+    metadata = {
+        "version": VERSION,
+        "kind": "revision_update",
+        "record_version": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "config_dir": str(config),
+        "previous_root": str(current_root),
+        "previous_package_files": package_files,
+        "install_root": str(new_root),
+        "package_files": candidate_files,
+        "package_created": False,
+        "files": file_snapshots,
+    }
+    _write_atomic(transaction / "plan.json", _json_bytes(plan))
+    _write_atomic(transaction / "transaction.json", _json_bytes(metadata))
+    package_created = False
+    try:
+        _verify_transaction_files(transaction, file_snapshots, set())
+        if new_root.exists():
+            _verify_owned_tree(new_root, candidate_files, owned_root=config)
+        else:
+            new_root.mkdir(parents=True, exist_ok=False)
+            package_created = True
+            metadata["package_created"] = True
+            _write_atomic(transaction / "transaction.json", _json_bytes(metadata))
+            for filename, digest in candidate_files.items():
+                target = new_root / filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(candidate / filename, target)
+                if _digest(_read(target)) != digest:
+                    raise OSError(f"Package read-back mismatch for {filename}")
+            _verify_owned_tree(new_root, candidate_files, owned_root=config)
+        writes: list[tuple[Path, bytes, bytes | None]] = [(hooks_path, hooks_after, original_hooks), (agents_path, agents_after, original_agents)]
+        if skill_owned and skill_after is not None and original_skill is not None:
+            writes.append((skill_path, skill_after, original_skill))
+        writes.append((active_path, active_after, active_before))
+        written_paths: set[str] = set()
+        for path, after, before in writes:
+            _verify_transaction_files(transaction, file_snapshots, written_paths)
+            _verify_owned_tree(current_root, package_files, owned_root=config)
+            _verify_owned_tree(new_root, candidate_files, owned_root=config)
+            _reject_reparse_components(path, owned_root=config)
+            current = _read(path) if path.exists() else None
+            if current != before:
+                raise RuntimeError(f"Configuration changed during update: {path.name}")
+            if before is None:
+                _write_new(path, after)
+            else:
+                _write_atomic(path, after)
+            if _read(path) != after:
+                raise OSError(f"Update read-back mismatch: {path.name}")
+            written_paths.add(str(path))
+            _verify_transaction_files(transaction, file_snapshots, written_paths)
+        _verify_owned_tree(current_root, package_files, owned_root=config)
+        _verify_owned_tree(new_root, candidate_files, owned_root=config)
+        _verify_transaction_files(transaction, file_snapshots, written_paths)
+    except BaseException as error:
+        residual: list[str] = []
+        for path_text, details in file_snapshots.items():
+            path = Path(path_text)
+            try:
+                _reject_reparse_components(path, owned_root=config)
+                if not _matches_file_state(path, exists=True, digest=details["after"]):
+                    continue
+                if details["before_exists"]:
+                    backup_path = transaction / details["backup"]
+                    _reject_reparse_components(backup_path, owned_root=transaction)
+                    backup = _read(backup_path)
+                    if _digest(backup) != details["before"]:
+                        residual.append(str(path))
+                    else:
+                        _write_atomic(path, backup)
+                else:
+                    path.unlink()
+            except (OSError, ValueError):
+                residual.append(str(path))
+        try:
+            _reject_reparse_components(new_root, owned_root=config)
+            if package_created and new_root.exists():
+                _verify_owned_tree(new_root, candidate_files, allow_incomplete=True, owned_root=config)
+                shutil.rmtree(new_root)
+        except (OSError, ValueError):
+            residual.append(str(new_root))
+        raise RuntimeError(f"Update failed: {type(error).__name__}; residual paths: {residual}; transaction: {transaction}") from error
+    return {**plan, "outcome": "updated", "transaction": str(transaction), "trust_review": "required through normal Codex hook trust flow"}
+
+
+def _rollback_revision_update(transaction_dir: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+    if metadata.get("record_version") != 1 or not isinstance(metadata.get("files"), dict):
+        raise ValueError("Revision update transaction is unsupported")
+    config = Path(metadata.get("config_dir", ""))
+    if not config.is_absolute():
+        raise ValueError("Transaction config directory must be absolute")
+    config = _absolute_lexical(config)
+    _reject_reparse_components(config)
+    expected_parent = _absolute_lexical(_manager_root(config) / "transactions")
+    if transaction_dir.parent != expected_parent:
+        raise ValueError("Transaction directory is outside its supported config destination")
+    install_root = _absolute_lexical(Path(metadata.get("install_root", "")))
+    previous_root = _absolute_lexical(Path(metadata.get("previous_root", "")))
+    expected_base = _manager_root(config)
+    if _config_from_package_root(install_root) != config or install_root.parent.name.casefold() != "revisions":
+        raise ValueError("Updated package path is outside its supported revision directory")
+    if _config_from_package_root(previous_root) != config:
+        raise ValueError("Previous package path is outside its supported config destination")
+    package_files = metadata.get("package_files")
+    previous_files = metadata.get("previous_package_files")
+    if not isinstance(package_files, dict) or _package_id(package_files) != install_root.name:
+        raise ValueError("Updated package inventory is invalid")
+    if not isinstance(previous_files, dict):
+        raise ValueError("Previous package inventory is invalid")
+    package_created = metadata.get("package_created")
+    if not isinstance(package_created, bool):
+        raise ValueError("Updated package creation flag is invalid")
+    _verify_owned_tree(install_root, package_files, owned_root=config)
+    _verify_owned_tree(previous_root, previous_files, owned_root=config)
+    hooks_path = _absolute_lexical(config / "hooks.json")
+    agents_path = _absolute_lexical(config / "AGENTS.md")
+    skill_path = _absolute_lexical(config / "skills" / "windows-command-preflight" / "SKILL.md")
+    active_path = _absolute_lexical(_active_record_path(config))
+    allowed = {str(hooks_path), str(agents_path), str(active_path)}
+    if str(skill_path) in metadata["files"]:
+        allowed.add(str(skill_path))
+    if set(metadata["files"]) != allowed:
+        raise ValueError("Transaction contains unsupported update files")
+    restore: list[tuple[Path, bytes | None, bool, Path, dict[str, Any]]] = []
+    for path_text, details in metadata["files"].items():
+        path = _absolute_lexical(Path(path_text))
+        if path_text not in allowed or not isinstance(details, dict):
+            raise ValueError("Transaction file record is invalid")
+        _reject_reparse_components(path, owned_root=config)
+        if not _matches_file_state(path, exists=True, digest=details.get("after")):
+            raise ValueError(f"Rollback precondition failed for {path}; installed bytes changed")
+        existed = details.get("before_exists")
+        if not isinstance(existed, bool):
+            raise ValueError(f"Transaction existence flag is invalid for {path}")
+        backup = None
+        if existed:
+            backup_path = transaction_dir / details.get("backup", "")
+            _reject_reparse_components(backup_path, owned_root=transaction_dir)
+            backup = _read(backup_path)
+            if _digest(backup) != details.get("before"):
+                raise ValueError(f"Transaction backup check failed for {path}")
+        elif details.get("before") is not None:
+            raise ValueError(f"Transaction prior state is invalid for {path}")
+        restore.append((path, backup, existed, backup_path if existed else transaction_dir / details.get("backup", ""), details))
+    restored: set[Path] = set()
+    try:
+        for path, backup, existed, backup_path, details in restore:
+            for candidate, _, candidate_existed, candidate_backup, candidate_details in restore:
+                if candidate in restored:
+                    if candidate_existed:
+                        matches = _matches_file_state(candidate, exists=True, digest=candidate_details.get("before"))
+                    else:
+                        matches = _matches_file_state(candidate, exists=False)
+                else:
+                    matches = _matches_file_state(candidate, exists=True, digest=candidate_details.get("after"))
+                if not matches:
+                    raise ValueError(f"Rollback target changed after preflight: {candidate}")
+                if candidate_existed:
+                    _reject_reparse_components(candidate_backup, owned_root=transaction_dir)
+                    if _digest(_read(candidate_backup)) != candidate_details.get("before"):
+                        raise ValueError(f"Transaction backup changed after preflight: {candidate.name}")
+            _verify_owned_tree(install_root, package_files, owned_root=config)
+            _verify_owned_tree(previous_root, previous_files, owned_root=config)
+            _reject_reparse_components(path, owned_root=config)
+            if existed:
+                if backup is None:
+                    raise ValueError(f"Transaction backup is missing for {path}")
+                _write_atomic(path, backup)
+            else:
+                if not _matches_file_state(path, exists=True, digest=details.get("after")):
+                    raise ValueError(f"Rollback target changed after preflight: {path}")
+                path.unlink()
+            restored.add(path)
+    except BaseException as error:
+        raise RuntimeError(f"Rollback incomplete after {type(error).__name__}; restored paths: {[str(path) for path in restored]}") from error
+    for path, backup, existed, _, _ in restore:
+        if existed:
+            if backup is None or _read(path) != backup:
+                raise OSError(f"Rollback read-back mismatch for {path}")
+        elif path.exists():
+            raise OSError(f"Rollback read-back mismatch for {path}")
+    removed_revision: str | None = None
+    if package_created:
+        _reject_reparse_components(install_root, owned_root=config)
+        _verify_owned_tree(install_root, package_files, owned_root=config)
+        shutil.rmtree(install_root)
+        removed_revision = str(install_root)
+    return {"outcome": "rolled_back", "restored": [str(path) for path, _, _, _, _ in restore], "removed_revision": removed_revision}
+
+
 def rollback(transaction_dir: Path) -> dict[str, Any]:
     transaction_dir = _absolute_lexical(transaction_dir)
     _reject_reparse_components(transaction_dir)
     metadata = json.loads((transaction_dir / "transaction.json").read_text(encoding="utf-8"))
     if metadata.get("version") != VERSION or not isinstance(metadata.get("files"), dict):
         raise ValueError("Transaction metadata is unsupported")
+    if metadata.get("kind") == "revision_update":
+        return _rollback_revision_update(transaction_dir, metadata)
     raw_config_dir = Path(metadata.get("config_dir", ""))
     if not raw_config_dir.is_absolute():
         raise ValueError("Transaction config directory must be absolute")
@@ -917,9 +1586,15 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--powershell-file", type=Path)
     validate_parser.add_argument("--powershell-executable", type=Path)
     validate_parser.add_argument("--fixtures", type=Path)
+    status_parser = sub.add_parser("status")
+    status_parser.add_argument("--config-dir", type=Path)
+    update_parser = sub.add_parser("update")
+    update_parser.add_argument("--config-dir", type=Path)
+    update_parser.add_argument("--source", type=Path)
+    update_parser.add_argument("--plan-only", action="store_true")
     install_parser = sub.add_parser("install")
-    install_parser.add_argument("--config-dir", type=Path, required=True)
-    install_parser.add_argument("--source", type=Path, default=ROOT)
+    install_parser.add_argument("--config-dir", type=Path)
+    install_parser.add_argument("--source", type=Path)
     install_parser.add_argument("--expected-hooks-sha256")
     install_parser.add_argument("--expected-agents-sha256")
     install_parser.add_argument("--expected-skill-sha256")
@@ -948,6 +1623,10 @@ def main(argv: list[str] | None = None) -> int:
                         output["command_included"] = True
         elif args.action == "validate":
             output = _validate(args.powershell_file, args.fixtures, args.powershell_executable)
+        elif args.action == "status":
+            output = status(args.config_dir)
+        elif args.action == "update":
+            output = update(args.config_dir, args.source, plan_only=args.plan_only)
         elif args.action == "install":
             output = install(args.config_dir, args.source, args.expected_hooks_sha256, args.expected_agents_sha256, args.plan_only, args.expected_skill_sha256)
         else:

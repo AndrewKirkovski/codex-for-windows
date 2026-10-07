@@ -8,6 +8,8 @@
     "doctor",
     "recommend",
     "validate",
+    "status",
+    "update",
     "install",
     "rollback",
     "preserve-v23-command-protections",
