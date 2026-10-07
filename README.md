@@ -1,67 +1,58 @@
-# Codex Windows prevention toolkit
+# Windows command prevention for Codex
 
-This Python standard library package helps prevent invalid Windows command
-construction. It provides environment checks, command recommendations,
-static validation, guarded installation, and rollback.
+## Why it exists
 
-Run `python windows_prevention.py doctor` to check Python, PowerShell, parser,
-and executable metadata availability. Run `python windows_prevention.py
-recommend --payload <json-file>` to classify a known hook payload. Command text
-is redacted unless `--show-command` is set. Run
-`python windows_prevention.py validate --fixtures fixtures/behavior.json` to
-check synthetic behavior fixtures. These commands do not execute candidate
-commands or scripts.
+Codex can choose the wrong Windows shell or runtime, or mishandle paths and
+quotes. Repeating failed commands wastes time and tokens. This toolkit helps
+Codex construct and check commands before it runs them.
 
-Use `python windows_prevention.py recommend --list-recipes` to list command
-recipes. Pass `--recipe <id>` to display one recipe. For PowerShell literals,
-double embedded single quotes. Native program examples use separate argument
-values. Replace placeholders with verified inputs before running a recipe.
+## Prevention comes first
 
-The PowerShell helper uses the native parser and reports diagnostic IDs and
-source locations. It omits parser messages because they can contain private
-source text. Metadata checks use PowerShell command discovery without invoking
-the discovered command.
+A short global Codex prompt points to the Windows preflight skill. The skill and
+tested recipes guide command construction, runtime selection, paths, quoting,
+editing, and process lifecycle.
 
-For script validation, pass `validate --powershell-file <script.ps1>
---powershell-executable <absolute-exe>` with the runtime that will execute the
-script. The direct `.ps1` Process Manager route uses Windows PowerShell 5.1.
-Validation defaults to that runtime on Windows. An explicit PowerShell 7
-execution call needs validation with that same executable. Check the returned
-interpreter path and version.
+| Part | Purpose |
+| --- | --- |
+| Prompt, skill, and recipes | Prevent command errors before execution. |
+| `windows_prevention.py` CLI | Check the environment, recommend commands, and validate scripts. |
+| Hooks | Serve as the last boundary and pass valid calls silently. |
 
-Installation requires an explicit Codex configuration directory and the exact
-current SHA-256 values for `hooks.json` and `AGENTS.md`. The installer checks
-all inputs before writing, saves byte-exact backups, copies the package,
-replaces the three owned v23 hook definitions in place, and reads the results
-back. It preserves unrelated hook entries and event state. It does not alter
-trust hashes. Review the installed hooks through Codex's normal trust flow;
-enabling hooks remains a user action. Rollback restores the saved files only
-when the installed files and package still match their recorded hashes.
-Installation stores absolute paths, so rollback can run from another working
-directory. Rollback rejects junctions and other reparse points in the owned
-package path before reading or removing their targets.
+These rules apply to Codex. They do not set policy for other Process Manager
+clients.
 
-To update an existing discovered preflight skill, pass its exact current hash
-as `--expected-skill-sha256`. The installer replaces it with a short pointer to
-the installed detailed skill. That file is backed up and included in rollback.
-Without this option, the existing skill stays unchanged. The automated installer
-upgrades one existing v23 guard per event. Fresh configurations need reviewed
-hook entries under the normal Codex configuration and trust flow.
+## Quick start
 
-The hook can classify command text and recognized payload shapes. It cannot
-prove schemas, test coverage, executable availability, output existence, or
-runtime behavior from a command string alone. `validate` reports missing
-prerequisites separately from invalid syntax and unsupported shapes. The
-behavior fixtures are synthetic contract examples, not findings from the
-historical audit.
+Requires Windows and Python, with no third-party Python packages. Run these
+commands from the toolkit directory:
 
-The package includes adapted files from a local v23 command guard baseline.
-See `NOTICE.md` for provenance limits and `LICENSE` for the MIT terms that
-apply to this toolkit. The v23 source hashes are retained for attribution.
+```powershell
+python windows_prevention.py doctor
+python windows_prevention.py recommend --list-recipes
+python windows_prevention.py install --help
+```
 
-Use [Process Manager for Windows](https://github.com/AndrewKirkovski/claude-code-bg-process-manager-windows)
-for hidden native commands, script routing, output capture, and process control.
-Use its separate `working_dir` and `env` fields. Use `prepare_command` when the
-server advertises it and a route is uncertain. Simple tested commands can run
-directly. See [recipes.md](recipes.md) for alternatives when it is absent and
-[evidence.md](evidence.md) for tests, report references, and external research.
+`recommend` offers recipes and checks command text against known rules.
+`validate` checks a reviewed script with the selected
+PowerShell parser. Neither command runs the proposed command or script.
+
+## Install and rollback
+
+The installer upgrades an existing v23 hook set only. It requires an explicit
+Codex configuration directory and the current hashes for `hooks.json` and
+`AGENTS.md`. It checks inputs, saves byte-exact backups, preserves unrelated
+hook entries and trust state, and reads changed files back. Fresh setups need
+reviewed hook entries. Review installed hooks through Codex's normal trust
+flow. Rollback restores only owned files that still match their recorded
+hashes.
+
+Static hooks cannot prove test coverage, command results, executable
+availability, output content, or runtime behavior. See [recipes.md](recipes.md)
+for command and parser details, [evidence.md](evidence.md) for test and research
+records, [NOTICE.md](NOTICE.md) for provenance, and [LICENSE](LICENSE) for the
+license terms.
+
+[Process Manager for Windows](https://github.com/AndrewKirkovski/claude-code-bg-process-manager-windows)
+is a separate shared service for command execution, routing, output
+normalization, and process control. Its client guidance does not define Codex
+policy.
