@@ -50,6 +50,7 @@ RECIPE_SECTIONS = {
     "required-outputs": "Verify result counts and prerequisites",
     "test-selection": "Select and verify tests",
     "process-control": "Control processes",
+    "powershell-collect-join": "Collect results before joining",
 }
 SUPPORTED_TOOLS = {
     "Bash", "shell_command", "functions.shell_command", "exec_command",

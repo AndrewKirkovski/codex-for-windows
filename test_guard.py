@@ -3,6 +3,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -346,6 +349,57 @@ class RegressionTests(unittest.TestCase):
                     "RG-WINDOWS-PATH-GLOB-001",
                     self.ids(payload),
                 )
+
+    def test_pipeline_join_parameter_binding_blocks(self) -> None:
+        for command in (
+            "Get-Process | Select-Object -First 2 -join ','",
+            "@(Get-Process) | Select-Object -First 2 -join ','",
+            "$items = @(Select-Object -First 2 -join ',')",
+            "Get-Process | select -join ','",
+            "Get-Process | Microsoft.PowerShell.Utility\\Select-Object -join ','",
+            "Get-Process | % -join ','",
+            "Get-Process | foreach -join ','",
+            "Get-Process | ForEach-Object -join ','",
+            "Get-Process |\n    Select-Object -First 2 -join ','",
+            "Get-Process | Select-Object -First 2 `\n -join ','",
+            "$source | ForEach-Object { $_ | Write-Output } -join ','",
+            "& { Select-Object -First 2 -join ',' }",
+            'powershell.exe -NoProfile -Command "Get-Process | Select-Object -First 2 -join"',
+            'pwsh.exe -NoProfile -Command "Get-Process | Select-Object -First 2 -join"',
+        ):
+            with self.subTest(command=command):
+                self.assertIn("POWERSHELL-PIPELINE-JOIN-001", self.ids(self.shell(command)))
+
+    def test_pipeline_join_operator_and_inert_text_are_allowed(self) -> None:
+        for command in (
+            "Get-Process | ForEach-Object { $_.Name -join ',' }",
+            "Get-Process | Select-Object '-Join'",
+            "Get-Process | Select-Object -First 2 # -Join",
+            "# Select-Object -join\nGet-Date",
+            "<# outer <# inner #> Select-Object -join #> Get-Date",
+            "Get-Process | Select-Object <# -join #> -First 2",
+            "$items = @(Get-Process | Select-Object -First 2); $items -join ','",
+            "(Get-Process | Select-Object -First 2) -join ','",
+            "($items) -join ','",
+            "Get-Process | Select-Object -Property Name",
+            "Get-Process | ForEach-Object { 'literal -join text' }",
+            '$note = @"\n"quotes" and Select-Object -join\n"@\nGet-Date',
+            "Get-Process | Select-Object `-join",
+            'Get-Process | ForEach-Object { "value: $($_.Name -join \' ,\')" }',
+            "& 'C:/tools/runner.exe' Select-Object -join",
+            "s -join",
+        ):
+            with self.subTest(command=command):
+                self.assertNotIn("POWERSHELL-PIPELINE-JOIN-001", self.ids(self.shell(command)))
+
+    def test_managed_join_check_inspects_wrapper_body(self) -> None:
+        for name in ("mcp__process_manager__sync_run", "mcp__process_manager__bg_run"):
+            payload = {"tool_name": name, "tool_input": {
+                "command": 'powershell.exe -NoProfile -NonInteractive -Command "1,2 | Select-Object -First 2 -join"',
+                "working_dir": "C:/repo",
+            }}
+            with self.subTest(tool_name=name):
+                self.assertIn("POWERSHELL-PIPELINE-JOIN-001", self.ids(payload))
 
     def test_managed_runner_allows_direct_script_dispatch(self) -> None:
         commands = (
@@ -741,6 +795,25 @@ class HookIOTests(unittest.TestCase):
             }),
         )
 
+    def test_prompt_preflight_supplies_join_recipe_before_construction(self) -> None:
+        for prompt in ("Inventory source files", "Use PowerShell", "Fix Select-Object -join"):
+            with self.subTest(prompt=prompt):
+                output = self.run_guard({"hook_event_name": "UserPromptSubmit", "prompt": prompt})
+                context = json.loads(output)["hookSpecificOutput"]["additionalContext"]
+                self.assertIn("POWERSHELL-PIPELINE-JOIN-PREFLIGHT-001", context)
+                self.assertIn("Collect", context)
+        self.assertEqual("", self.run_guard({"hook_event_name": "UserPromptSubmit", "prompt": "Join this Python list"}))
+
+    def test_pipeline_join_hook_denies_bad_form_and_keeps_good_form_silent(self) -> None:
+        base = {"hook_event_name": "PreToolUse", "tool_name": "shell_command"}
+        bad = self.run_guard({**base, "tool_input": {"command": "1,2 | Select-Object -First 2 -join ','"}})
+        response = json.loads(bad)["hookSpecificOutput"]
+        self.assertEqual("deny", response["permissionDecision"])
+        self.assertIn("POWERSHELL-PIPELINE-JOIN-001", response["permissionDecisionReason"])
+        self.assertIn("$items = @(", response["permissionDecisionReason"])
+        good = self.run_guard({**base, "tool_input": {"command": "$items = @(1,2 | Select-Object -First 2); $items -join ','"}})
+        self.assertEqual("", good)
+
     def test_session_start_supplies_writable_root_preflight(self) -> None:
         output = self.run_guard({"hook_event_name": "SessionStart"})
         parsed = json.loads(output)
@@ -768,6 +841,61 @@ class HookIOTests(unittest.TestCase):
                     self.assertEqual("block", output["decision"])
                 else:
                     self.assertFalse(output["continue"])
+
+
+class PowerShellRecipeRuntimeTests(unittest.TestCase):
+    def test_collect_join_recipe_and_binding_error_on_available_runtimes(self) -> None:
+        executables: list[Path] = []
+        powershell51 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        if powershell51.is_file():
+            executables.append(powershell51)
+        pwsh = os.environ.get("CODEX_TEST_PWSH") or shutil.which("pwsh")
+        if pwsh:
+            candidate = Path(pwsh)
+            self.assertTrue(candidate.is_absolute() and candidate.is_file(), "Selected pwsh executable is missing")
+            if candidate not in executables:
+                executables.append(candidate)
+        if not executables:
+            self.skipTest("No PowerShell runtime is available")
+        script = """$ErrorActionPreference = 'Stop'
+try {
+    $source = @('alpha', 'beta')
+    $items = @($source | Select-Object -First 2)
+    if ($items.Count -ne 2) { throw 'Expected two results' }
+    $text = $items -join ', '
+    if ($text -cne 'alpha, beta') { throw 'Joined output did not match' }
+    foreach ($count in @(0, 1, 2)) {
+        $selected = @($source | Select-Object -First $count)
+        if ($selected -isnot [array] -or $selected.Count -ne $count) { throw 'Array count mismatch' }
+    }
+    $mapped = @($source | ForEach-Object { $_.ToUpperInvariant() })
+    if (($mapped -join ', ') -cne 'ALPHA, BETA') { throw 'Projection output mismatch' }
+    $bindingFailed = $false
+    try { $source | Select-Object -First 2 -join ', ' | Out-Null }
+    catch [System.Management.Automation.ParameterBindingException] {
+        if ($_.Exception.ParameterName -ne 'join') { throw }
+        $bindingFailed = $true
+    }
+    if (-not $bindingFailed) { throw 'Expected the unsupported join parameter to fail' }
+    [Console]::Out.WriteLine('PIPELINE_JOIN_OK ' + $PSVersionTable.PSVersion.ToString())
+    exit 0
+} catch {
+    [Console]::Error.WriteLine($_.ToString())
+    exit 1
+}
+
+"""
+        for executable in executables:
+            with self.subTest(executable=str(executable)):
+                result = subprocess.run(
+                    [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"],
+                    input=script, capture_output=True, text=True, encoding="utf-8",
+                    timeout=30, check=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("PIPELINE_JOIN_OK", result.stdout)
+                print(result.stdout.strip())
 
 
 if __name__ == "__main__":

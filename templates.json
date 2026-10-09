@@ -46,6 +46,11 @@
       "template": "make.bat <owning-target>",
       "shell": "argv",
       "input_fields": ["owning_target"]
+    },
+    "POWERSHELL-PIPELINE-JOIN-001": {
+      "template": "Use $items = @(<pipeline>), check the required count and values, then evaluate $items -join <separator>. See recipe powershell-collect-join.",
+      "shell": "powershell",
+      "input_fields": ["pipeline", "separator"]
     }
   }
 }

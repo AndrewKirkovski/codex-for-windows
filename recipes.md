@@ -149,6 +149,28 @@ The behavior fixture validator accepts explicit observations for lookup
 cardinality, prerequisite results, required outputs, and result kinds. Those
 observations must come from actual checks. A command hook cannot infer them.
 
+## Collect results before joining
+
+Collect a PowerShell pipeline into an array before applying the `-join`
+operator. `Select-Object` and `ForEach-Object` do not accept a `-join`
+parameter. Use the required selection count and separator for the task.
+
+The following example selects two values and checks the joined output:
+
+```powershell
+$source = @('alpha', 'beta')
+$items = @($source | Select-Object -First 2)
+if ($items.Count -ne 2) { throw 'Expected two results' }
+
+$text = $items -join ', '
+if ($text -cne 'alpha, beta') { throw 'Joined output did not match' }
+```
+
+For a `ForEach-Object` projection, collect its output with `@(...)` in the
+same way. Verify the selected count and values before using the joined text.
+A PowerShell syntax check does not detect unsupported cmdlet parameters.
+Inspect uncertain parameters with `(Get-Command <cmdlet>).Parameters`.
+
 ## Select and verify tests
 
 Read the project's declared test entrypoint and filter syntax. Confirm the

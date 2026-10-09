@@ -118,6 +118,13 @@ catches only for independent evidence that must all remain visible; use
 fail-fast aggregation for dependent work where any failure invalidates the
 aggregate. Neither choice cancels already-started work.
 
+For PowerShell pipeline output, collect the whole pipeline into an array with
+`@(...)`, check the required count and values, then apply `-join` to the array.
+`Select-Object` and `ForEach-Object` do not accept a `-join` parameter. Syntax
+parsing does not check cmdlet parameter binding. Inspect uncertain parameters
+with `(Get-Command <cmdlet>).Parameters`. Use the
+[collect results before joining recipe](../../recipes.md#collect-results-before-joining).
+
 Exit 0 or absence of stderr is not the final proof. Verify the intended file,
 output, test coverage, count, route, or other task-specific postcondition.
 

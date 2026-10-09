@@ -154,6 +154,11 @@ RULE_MESSAGES = {
         "@(foreach (...) { ... }) | ..., accumulate an array and pipe it, or "
         "use <input> | ForEach-Object { ... } | ...."
     ),
+    "POWERSHELL-PIPELINE-JOIN-001": (
+        "Blocked -join as a parameter to Select-Object or ForEach-Object. "
+        "Use $items = @(<pipeline>), verify the required count and values, "
+        "then apply $items -join <separator>. See recipe powershell-collect-join."
+    ),
     "SECRET-PROMPT-001": (
         "Blocked a high-confidence credential in the prompt. Redact or remove "
         "the credential value and resubmit."
@@ -1082,6 +1087,150 @@ def _foreach_findings(command: str) -> list[Finding]:
     return []
 
 
+def _powershell_pipeline_stages(command: str) -> list[list[tuple[str, bool]]]:
+    """Keep command stages at each grouping depth; quoted text is inert."""
+    stages: list[list[tuple[str, bool]]] = []
+    buffers: list[list[tuple[str, bool]]] = [[]]
+    word: list[str] = []
+    word_inert = False
+    index = 0
+
+    def flush_word() -> None:
+        nonlocal word_inert
+        if word:
+            buffers[-1].append(("".join(word), word_inert))
+            word.clear()
+            word_inert = False
+
+    def flush_stage() -> None:
+        if buffers[-1]:
+            stages.append(buffers[-1].copy())
+            buffers[-1].clear()
+
+    while index < len(command):
+        char = command[index]
+        pair = command[index:index + 2]
+        if pair in {"@'", '@"'}:
+            flush_word()
+            closing = re.search(rf"(?m)^[ \t]*{re.escape(pair[1])}@", command[index + 2:])
+            index = len(command) if closing is None else index + 2 + closing.end()
+            buffers[-1].append(("", True))
+            continue
+        if pair == "<#":
+            flush_word()
+            comment_depth = 1
+            index += 2
+            while index < len(command) and comment_depth:
+                marker = command[index:index + 2]
+                if marker in {"<#", "#>"}:
+                    comment_depth += 1 if marker == "<#" else -1
+                    index += 2
+                else:
+                    index += 1
+            continue
+        if char == "#" and not word:
+            while index < len(command) and command[index] not in "\r\n":
+                index += 1
+            continue
+        if char in {"'", '"'}:
+            flush_word()
+            quote = char
+            index += 1
+            while index < len(command):
+                current = command[index]
+                if quote == "'" and command[index:index + 2] == "''":
+                    index += 2
+                    continue
+                if quote == '"' and current == "`" and index + 1 < len(command):
+                    index += 2
+                    continue
+                index += 1
+                if current == quote:
+                    break
+            buffers[-1].append(("", True))
+            continue
+        if char == "`" and index + 1 < len(command):
+            escaped = command[index + 1]
+            index += 2
+            if escaped in "\r\n":
+                if escaped == "\r" and index < len(command) and command[index] == "\n":
+                    index += 1
+            else:
+                word.append(escaped)
+                word_inert = True
+            continue
+        if char in "|;\r\n":
+            flush_word()
+            flush_stage()
+            if char == "\r" and index + 1 < len(command) and command[index + 1] == "\n":
+                index += 1
+            index += 1
+            continue
+        if char.isspace():
+            flush_word()
+            index += 1
+            continue
+        if char in "({[":
+            flush_word()
+            buffers[-1].append((char, False))
+            buffers.append([])
+            index += 1
+            continue
+        if char in ")}]":
+            flush_word()
+            flush_stage()
+            if len(buffers) > 1:
+                buffers.pop()
+            buffers[-1].append((char, False))
+            index += 1
+            continue
+        if char == "&":
+            flush_word()
+            buffers[-1].append((char, False))
+            index += 1
+            continue
+        word.append(char)
+        index += 1
+    flush_word()
+    while buffers:
+        flush_stage()
+        buffers.pop()
+    return stages
+
+
+def _pipeline_join_text_findings(command: str) -> list[Finding]:
+    cmdlets = {"select-object", "select", "foreach-object", "foreach", "%"}
+    punctuation = {"", "&", "(", ")", "[", "]", "{", "}", "@"}
+    for stage in _powershell_pipeline_stages(command):
+        command_index = next((index for index, (token, inert) in enumerate(stage)
+                              if inert or token not in punctuation), None)
+        if command_index is None:
+            continue
+        command_token, inert = stage[command_index]
+        if inert or _basename(command_token) not in cmdlets:
+            continue
+        if any(not inert and token.lower() == "-join"
+               for token, inert in stage[command_index + 1:]):
+            return [_finding("POWERSHELL-PIPELINE-JOIN-001")]
+    return []
+
+
+def _pipeline_join_findings(command: str, depth: int = 0) -> list[Finding]:
+    direct = _pipeline_join_text_findings(command)
+    if direct:
+        return direct
+    segments, _ = _split_shell(command)
+    bodies = [body for segment in segments
+              for body, _ in _nested_command_bodies(segment)]
+    if depth >= MAX_NESTED_COMMAND_DEPTH:
+        return [_finding("NESTED-COMMAND-DEPTH-001")] if bodies else []
+    for body in bodies:
+        findings = _pipeline_join_findings(body, depth + 1)
+        if findings:
+            return findings
+    return []
+
+
 def _deduplicate(findings: list[Finding]) -> list[Finding]:
     unique: list[Finding] = []
     seen: set[str] = set()
@@ -1115,6 +1264,7 @@ def classify(payload: object) -> list[Finding]:
         findings.extend(_process_findings(segments))
         findings.extend(_managed_bare_cmdlet_findings(tool_name, segments))
         findings.extend(_foreach_findings(command))
+        findings.extend(_pipeline_join_findings(command))
     return _deduplicate(findings)
 
 
@@ -1151,6 +1301,12 @@ def prompt_preflight_context(prompt: str) -> str:
             "WINDOWS-COMMAND-ROUTING-PREFLIGHT-001: Select the execution surface "
             "before formatting. Managed runners accept direct executables and "
             ".bat/.cmd/.ps1 targets, not bare PowerShell cmdlets."
+        )
+    if any(token in lower for token in ("powershell", "select-object", "foreach-object", "-join", "inventory")):
+        contexts.append(
+            "POWERSHELL-PIPELINE-JOIN-PREFLIGHT-001: Collect PowerShell pipeline "
+            "output with @(...), check the count and values, then apply -join "
+            "to the array. Select-Object and ForEach-Object have no -join parameter."
         )
     if any(token in lower for token in ("native addon", "native module", "node_module_version", "better-sqlite3", " abi ")):
         contexts.append(
@@ -1299,6 +1455,9 @@ def contract_cases() -> list[tuple[str, object, object]]:
         ("POWERSHELL-FOREACH-PIPE-001",
          _shell_payload("& { foreach ($x in 1..2) { $x } | Measure-Object }"),
          _shell_payload("@(foreach ($x in 1..2) { $x }) | Measure-Object")),
+        ("POWERSHELL-PIPELINE-JOIN-001",
+         _shell_payload("Get-Process | Select-Object -First 2 -join ','"),
+         _shell_payload("$items = @(Get-Process | Select-Object -First 2); $items -join ','")),
     ]
 
 
